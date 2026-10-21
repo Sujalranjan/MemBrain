@@ -67,7 +67,12 @@ def create_app(
     @app.get("/api/me", tags=["auth"])
     async def whoami(principal: PrincipalDep, settings: SettingsDep):
         """The workspace this request is scoped to, and the key used (useful to verify a key works)."""
-        return {"workspace": principal.workspace, "key": principal.key_name, "auth_enabled": settings.auth_enabled}
+        return {
+            "workspace": principal.workspace,
+            "key": principal.key_name,
+            "auth_enabled": settings.auth_enabled,
+            "read_only": settings.read_only,
+        }
 
     @app.get("/", include_in_schema=False)
     async def serve_ui():

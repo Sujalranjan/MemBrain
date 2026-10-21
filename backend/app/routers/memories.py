@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from app.deps import EmbedderDep, SessionDep, SettingsDep, WorkspaceDep
+from app.deps import EmbedderDep, SessionDep, SettingsDep, WorkspaceDep, writable
 from app.schemas import MemoryCreate, MemoryOut
 from app.services import memories as svc
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/memories", tags=["memories"])
 
 
-@router.post("", response_model=MemoryOut, status_code=201)
+@router.post("", response_model=MemoryOut, status_code=201, dependencies=[writable])
 async def create_memory(
     data: MemoryCreate, session: SessionDep, embedder: EmbedderDep, settings: SettingsDep, workspace: WorkspaceDep
 ):
@@ -38,14 +38,14 @@ async def list_memories(
     return [svc.to_out(m) for m in await svc.list_memories(session, workspace, limit, offset)]
 
 
-@router.delete("/{memory_id}", status_code=204)
+@router.delete("/{memory_id}", status_code=204, dependencies=[writable])
 async def delete_memory(memory_id: uuid.UUID, session: SessionDep, workspace: WorkspaceDep):
     if not await svc.delete_memory(session, workspace, memory_id):
         raise HTTPException(status_code=404, detail="Memory not found")
     return Response(status_code=204)
 
 
-@router.post("/{memory_id}/reinforce", response_model=MemoryOut)
+@router.post("/{memory_id}/reinforce", response_model=MemoryOut, dependencies=[writable])
 async def reinforce_memory(memory_id: uuid.UUID, session: SessionDep, workspace: WorkspaceDep):
     memory = await svc.get_memory(session, workspace, memory_id)
     if memory is None:

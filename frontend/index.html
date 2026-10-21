@@ -339,6 +339,9 @@ body::before {
 }
 
 .ws-badge { cursor: pointer; }
+body.read-only [data-write] { opacity: 0.45; pointer-events: none; }
+.ro-banner { display: none; margin: 0 0 4px; padding: 8px 12px; border: 1px solid rgba(255,190,11,0.3); border-radius: var(--r-sm); background: rgba(255,190,11,0.08); color: var(--amber); font-size: 12px; }
+body.read-only .ro-banner { display: block; }
 .key-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(2,2,10,0.75); backdrop-filter: blur(6px); }
 .key-overlay[hidden] { display: none; }
 .key-dialog { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 12px; padding: 24px; background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r); box-shadow: var(--glow2); }
@@ -1228,6 +1231,7 @@ select option { background: #0a0a1a; }
   </div>
 
   <div class="content">
+    <div class="ro-banner" role="status">Read-only demo: browse, search, explore the graph and Ask Anything over sample enterprise notes. Capturing and editing are disabled.</div>
 
     <div class="panel active" id="panel-capture">
       <div><div class="sec-title">Add Knowledge</div><div class="sec-sub">Instantly indexed and semantically linked by Membrain's neural engine</div></div>
@@ -1241,7 +1245,7 @@ select option { background: #0a0a1a; }
       <div class="ig"><label class="lbl">Content</label><textarea id="c-body" rows="5" placeholder="Describe this piece of knowledge in detail…"></textarea></div>
       <div class="ig"><label class="lbl">Tags (comma-separated)</label><input type="text" id="c-tags" placeholder="e.g. cloud, budget, Q3, AWS"/></div>
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-        <button class="btn btn-primary" id="cap-btn" onclick="doCapture()"><span id="cap-btn-txt">Store in Membrain</span></button>
+        <button class="btn btn-primary" id="cap-btn" data-write onclick="doCapture()"><span id="cap-btn-txt">Store in Membrain</span></button>
       </div>
     </div>
 
@@ -1267,12 +1271,12 @@ select option { background: #0a0a1a; }
           <select id="v-type"><option value="voice">Voice Note</option><option value="meeting">Meeting</option><option value="decision">Decision</option></select>
         </div>
       </div>
-      <div><button class="btn btn-primary" onclick="saveVoice()">Save Voice Memory</button></div>
+      <div><button class="btn btn-primary" data-write onclick="saveVoice()">Save Voice Memory</button></div>
     </div>
 
     <div class="panel" id="panel-file">
       <div><div class="sec-title">File Import</div><div class="sec-sub">Text is extracted, chunked and indexed in the background</div></div>
-      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event)">
+      <div class="drop-zone" id="drop-zone" data-write onclick="document.getElementById('file-input').click()" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event)">
         <div class="drop-icon">📎</div>
         <div class="drop-text" id="drop-text">Drop a file here or click to browse</div>
         <div class="drop-hint">PDF · DOCX · TXT · MD · CSV — Max 10 MB</div>
@@ -1285,7 +1289,7 @@ select option { background: #0a0a1a; }
         </div>
       </div>
       <div class="ig"><label class="lbl">Additional Tags</label><input type="text" id="f-tags" placeholder="e.g. Q3, contract"/></div>
-      <div><button class="btn btn-primary" id="f-btn" onclick="saveFile()">Upload &amp; Index</button></div>
+      <div><button class="btn btn-primary" id="f-btn" data-write onclick="saveFile()">Upload &amp; Index</button></div>
       <div class="ig"><label class="lbl">Recent Imports</label><div class="jobs" id="jobs-list"><div class="job-empty">No imports yet.</div></div></div>
     </div>
 
@@ -1554,8 +1558,15 @@ document.querySelectorAll('.nav-item[data-panel]').forEach(el => {
     if (id === 'graph') refreshGraph().then(() => setTimeout(renderGraph, 50));
     if (id === 'decay') renderDecay();
     if (id === 'file') loadJobs();
+    history.replaceState(null, '', '#' + id);
   });
 });
+
+function openPanelFromHash() {
+  const nav = document.querySelector(`.nav-item[data-panel="${CSS.escape(location.hash.slice(1))}"]`);
+  if (nav) nav.click();
+}
+window.addEventListener('hashchange', openPanelFromHash);
 
 function selType(el, type) {
   document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
@@ -1617,7 +1628,8 @@ async function loadIdentity() {
     const res = await apiFetch('/api/me');
     if (!res.ok) { document.getElementById('ws-name').textContent = res.status === 401 ? 'Locked' : 'Offline'; return false; }
     const me = await res.json();
-    document.getElementById('ws-name').textContent = me.workspace + (me.key ? ` · ${me.key}` : '');
+    document.getElementById('ws-name').textContent = me.workspace + (me.key ? ` · ${me.key}` : '') + (me.read_only ? ' · read-only' : '');
+    document.body.classList.toggle('read-only', !!me.read_only);
     return true;
   } catch (e) {
     document.getElementById('ws-name').textContent = 'Offline';
@@ -2068,7 +2080,7 @@ function renderBrowse() {
           <div class="decay-lbl">Strength: ${Math.round(d * 100)}%</div>
           <div class="decay-bar"><div class="decay-fill" style="width:${d * 100}%;background:${dc}"></div></div>
         </div>
-        <button class="btn btn-danger btn-sm" onclick="deleteMem('${m.id}')">Delete</button>
+        <button class="btn btn-danger btn-sm" data-write onclick="deleteMem('${m.id}')">Delete</button>
       </div>
     </div>`;
   }).join('');
@@ -2397,7 +2409,7 @@ function renderDecay() {
         <div class="decay-bar" style="width:90px"><div class="decay-fill" style="width:${m.decay * 100}%;background:${decayColor(m.decay)}"></div></div>
         <div class="decay-pct" style="color:var(--coral)">${Math.round(m.decay * 100)}%</div>
         <div class="decay-hl" title="Half-life: retention halves every ${halfLife(m).toFixed(1)} days. It grows each time this memory is reinforced or cited in an answer.">t½ ${Math.round(halfLife(m))}d</div>
-        <button class="btn btn-ghost btn-sm" onclick="reinforce('${m.id}')">Reinforce</button>
+        <button class="btn btn-ghost btn-sm" data-write onclick="reinforce('${m.id}')">Reinforce</button>
       </div>`).join('')}
     </div>`;
   }
@@ -2453,7 +2465,7 @@ function getRelated(mem) {
 // INIT
 updateStats();
 loadIdentity();
-loadMemories();
+loadMemories().then(openPanelFromHash);
 </script>
 </body>
 </html>

@@ -1,12 +1,28 @@
-# MemBrain — Enterprise Neural Cortex
+# MemBrain
 
 [![CI](https://github.com/Sujalranjan/MemBrain/actions/workflows/ci.yml/badge.svg)](https://github.com/Sujalranjan/MemBrain/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%20%7C%203.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)
+[![Deploy to Render](https://img.shields.io/badge/deploy-Render-46E3B7?logo=render&logoColor=white)](https://render.com/deploy?repo=https://github.com/Sujalranjan/MemBrain)
 
-**Ending corporate amnesia through semantic knowledge graphs.**
+**A self-hosted knowledge base for teams: capture meeting notes, decisions, SOPs, voice notes and documents, then search them by meaning and get cited answers.**
 
-MemBrain captures unstructured team knowledge (meeting notes, decisions, SOPs, voice notes, files), indexes it with a self-hosted hybrid retrieval engine, answers natural-language questions over it, and visualizes how memories relate in an interactive force-directed knowledge graph.
+MemBrain indexes unstructured team knowledge with a hybrid retrieval engine (vector search plus BM25, fused with RRF) built entirely on PostgreSQL. It answers questions with citations to the exact source passages, models how knowledge fades over time, and draws how memories relate in a force-directed graph.
 
-> Originally built for the AlphaNimble Hackathon (March 2026); now being developed into a production-grade system. See [History](#history) and the [Roadmap](#roadmap).
+![Semantic search over sample enterprise notes](docs/screenshots/search.png)
+
+## Highlights
+
+- **Measured retrieval quality.** A benchmark harness on public [BEIR](https://github.com/beir-cellar/beir) datasets shows hybrid search beating vector-only by **+5.3% Recall@5 on SciFact** (0.765 → 0.806) and +11.3% on NFCorpus. Fusion settings were tuned on train splits and reported on held-out test splits.
+- **BM25 implemented in Postgres.** The evaluation showed the built-in `ts_rank` was dragging hybrid results *below* vector-only. An inverted index with BM25 scoring in SQL raised keyword Recall@5 from 0.07 to 0.75 ([details](#retrieval-evaluation)).
+- **One database, no extra infrastructure.** Vectors (pgvector HNSW), BM25 postings, the background job queue (`FOR UPDATE SKIP LOCKED`) and distributed rate limiting (atomic token buckets) all live in PostgreSQL.
+- **Grounded answers.** Claude's Citations API ties every claim to a quoted span of a stored memory. Stored text is treated as data, never as instructions.
+- **Production basics.** Multi-tenant API keys (hashed), workspace isolation, a read-only demo mode, Alembic migrations, a multi-stage Docker image, and CI running 86 tests on Python 3.10 and 3.12 plus an end-to-end smoke test of the built image.
+
+**Contents:** [Features](#features) · [Architecture](#architecture) · [Retrieval evaluation](#retrieval-evaluation) · [API](#api) · [Quickstart](#quickstart) · [Deployment](#deployment) · [Configuration](#configuration) · [Testing](#testing) · [History](#history)
+
+> Originally built for the AlphaNimble Hackathon (March 2026), then rebuilt into a production-grade system. See [History](#history).
 
 ## Features
 
@@ -25,11 +41,12 @@ MemBrain captures unstructured team knowledge (meeting notes, decisions, SOPs, v
 
 ```mermaid
 flowchart LR
-    UI["Frontend<br/>HTML/CSS/JS, Canvas graph"] -->|REST| API["FastAPI"]
+    UI["Frontend<br/>HTML/CSS/JS, Canvas graph"] -->|"REST + API key"| GW["Auth + rate limit<br/>(FastAPI dependencies)"]
+    GW --> API["FastAPI routers<br/>memories, search, ask,<br/>documents, graph"]
     API --> EMB["fastembed<br/>BGE-small (ONNX, local)"]
     API -->|"/api/ask"| LLM["Claude<br/>Citations API"]
-    API -->|async SQLAlchemy| PG[("PostgreSQL 16<br/>pgvector + tsvector<br/>+ job queue")]
-    W["Ingestion worker<br/>pypdf, python-docx"] -->|claim jobs| PG
+    API -->|async SQLAlchemy| PG[("PostgreSQL 16<br/>pgvector HNSW · BM25 postings<br/>job queue · token buckets")]
+    W["Ingestion worker<br/>pypdf, python-docx"] -->|"SKIP LOCKED"| PG
     W --> EMB
     UI -.->|offline cache| LS[("localStorage")]
 ```
@@ -147,6 +164,7 @@ Keys are managed from the command line:
 python -m app.cli create-key --workspace acme --name "ci pipeline"   # prints the key once
 python -m app.cli list-keys
 python -m app.cli revoke-key <prefix>
+python -m app.cli seed-demo --workspace demo   # load the sample notes into an empty workspace
 # with Docker: docker compose exec api python -m app.cli create-key --workspace acme --name laptop
 ```
 
@@ -218,6 +236,26 @@ Open **http://127.0.0.1:8000**. The first start downloads the embedding model (~
 
 To enable AI answers in **Ask Anything**, put `ANTHROPIC_API_KEY=...` in a `.env` file at the repo root (see [`.env.example`](.env.example)). Everything else works without it.
 
+## Deployment
+
+The image runs anywhere that runs Docker, next to any PostgreSQL 16 that offers the `vector` extension (Render, Neon, Supabase, AWS RDS and Cloud SQL all do). The app accepts the connection strings those providers hand out (`postgres://…?sslmode=require`) as they are.
+
+### One-click public demo on Render
+
+[`render.yaml`](render.yaml) is a Render Blueprint that creates a Postgres database and the web service from the Dockerfile:
+
+1. On Render, choose **New > Blueprint** and select this repository (or use the *Deploy to Render* badge above).
+2. Render provisions everything. On first boot the container runs migrations and seeds the `demo` workspace with 36 sample enterprise notes.
+3. Optionally, add `ANTHROPIC_API_KEY` in the service's environment to enable generated answers. Without it, Ask Anything returns the most relevant memories.
+
+The blueprint runs the demo **read-only** (`READ_ONLY=true`): visitors can browse, search, explore the graph and ask questions, but cannot add, edit or delete anything. Rate limits are lowered (60 requests per minute, and 5 questions per minute so a public link can't run up a model bill).
+
+Notes on the free tiers: the container uses about 430 MB of RAM, which fits a 512 MB instance with little headroom; free web services sleep when idle (the first request takes about 30 seconds); and Render's free database expires after 30 days. Use paid plans for anything long-lived.
+
+### Production settings
+
+For a real team deployment: set `AUTH_ENABLED=true` and create a key per person or integration (`python -m app.cli create-key`); leave `READ_ONLY` off; run ingestion in dedicated workers (`INGESTION_WORKER=false` on the API, plus `python -m app.worker` processes); and keep the database on a plan with backups.
+
 ## Configuration
 
 Every setting has a working local default. Override them through environment variables or `.env` (see [`.env.example`](.env.example)).
@@ -227,6 +265,8 @@ Every setting has a working local default. Override them through environment var
 | `DATABASE_URL` | `postgresql+asyncpg://membrain:membrain@localhost:5432/membrain` | Postgres connection |
 | `AUTH_ENABLED` | `false` | Require API keys; the key then decides the workspace |
 | `WORKSPACE` | `engineering` | Workspace used for every request while auth is disabled |
+| `READ_ONLY` | `false` | Public demo mode: reads, search and answers work; creating, editing and deleting are refused |
+| `SEED_DEMO` | `false` | Docker entrypoint: load the sample notes into an empty `WORKSPACE` on startup |
 | `RATE_LIMIT_ENABLED` | `true` | Enforce per-key (or per-IP) token buckets |
 | `RATE_LIMIT_PER_MINUTE` / `ASK_RATE_LIMIT_PER_MINUTE` | `120` / `10` | Bucket sizes for all API routes, and the extra bucket for `/api/ask` |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | fastembed model (384-dim) |
@@ -302,6 +342,8 @@ Dockerfile             # multi-stage image: venv + baked-in model, non-root, hea
 docker/entrypoint.sh   # migrate, then run `api` or `worker`
 docker-compose.yml     # db, api, optional scaled workers
 scripts/smoke_test.sh  # end-to-end check used by CI
+render.yaml            # Render Blueprint for the public demo
+docs/screenshots/      # README images
 .github/               # CI workflow, Dependabot
 ```
 
@@ -330,7 +372,8 @@ The retrieval layer was then rebuilt in-house: local embeddings, pgvector, Postg
 - [x] Containerized API, GitHub Actions CI
 - [x] API-key auth, multi-tenant workspaces, rate limiting
 - [x] Retrieval quality evaluation (Recall@k, MRR, nDCG on BEIR + in-domain set) and BM25 keyword ranking
-- [ ] Live demo deployment
+- [x] Deployment blueprint (Render), read-only demo mode, sample data
+- [ ] Frontend overhaul
 
 ## Team
 

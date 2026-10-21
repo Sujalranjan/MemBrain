@@ -52,3 +52,17 @@ def test_spacing_effect_rewards_reviewing_fading_memories():
 
 def test_stability_is_capped():
     assert reviewed_stability(MAX_STABILITY_DAYS, NOW - timedelta(days=900), NOW) == MAX_STABILITY_DAYS
+
+
+@pytest.mark.parametrize(
+    "given, expected",
+    [
+        ("postgres://u:p@host:5432/db", "postgresql+asyncpg://u:p@host:5432/db"),
+        ("postgresql://u:p@host/db?sslmode=require", "postgresql+asyncpg://u:p@host/db?ssl=require"),
+        ("postgresql+asyncpg://u:p@host/db", "postgresql+asyncpg://u:p@host/db"),
+    ],
+)
+def test_hosted_database_urls_are_normalised(given, expected):
+    from app.config import Settings
+
+    assert Settings(database_url=given).database_url == expected

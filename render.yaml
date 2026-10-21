@@ -1,0 +1,38 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# "New > Blueprint" on Render (or the Deploy button in the README) creates the database and the app from
+# this file. The app is a public, read-only demo seeded with sample notes; see README > Deployment.
+databases:
+  - name: membrain-db
+    plan: free
+    databaseName: membrain
+    user: membrain
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: membrain
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: membrain-db
+          property: connectionString
+      - key: WORKSPACE
+        value: demo
+      - key: SEED_DEMO
+        value: "true"
+      - key: READ_ONLY
+        value: "true"
+      - key: INGESTION_WORKER
+        value: "false"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: ASK_RATE_LIMIT_PER_MINUTE
+        value: "5"
+      # Optional: set in the Render dashboard to enable generated answers (keep the ask limit low).
+      - key: ANTHROPIC_API_KEY
+        sync: false

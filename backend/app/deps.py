@@ -55,6 +55,14 @@ def get_workspace(principal: PrincipalDep) -> str:
 WorkspaceDep = Annotated[str, Depends(get_workspace)]
 
 
+def require_writable(settings: SettingsDep) -> None:
+    if settings.read_only:
+        raise HTTPException(status_code=403, detail="This is a read-only demo: search and Ask Anything still work")
+
+
+writable = Depends(require_writable)
+
+
 def rate_limit(scope: str, limit_setting: str):
     """Dependency enforcing a per-caller token bucket; the caller is the API key, or the client IP without auth."""
 

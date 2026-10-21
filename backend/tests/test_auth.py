@@ -79,7 +79,7 @@ def test_x_api_key_header_and_revocation(secured, database_url):
     client, _ = secured
     key = asyncio.run(_create_key(database_url, "acme", "laptop"))
     me = client.get("/api/me", headers={"X-API-Key": key}).json()
-    assert me == {"workspace": "acme", "key": "laptop", "auth_enabled": True}
+    assert me == {"workspace": "acme", "key": "laptop", "auth_enabled": True, "read_only": False}
 
     assert asyncio.run(_revoke(database_url, key))
     assert client.get("/api/me", headers={"X-API-Key": key}).status_code == 401
@@ -155,3 +155,17 @@ def test_concurrent_requests_cannot_overspend_a_bucket(database_url):
             await engine.dispose()
 
     assert sum(asyncio.run(burst())) == 5
+
+
+def test_read_only_demo_blocks_writes_but_serves_reads(make_client):
+    writer = make_client("demo")
+    mid = writer.post("/api/memories", json={"title": "Runbook", "body": "Restart the worker."}).json()["id"]
+
+    demo = make_client("demo", read_only=True)
+    assert demo.post("/api/memories", json={"title": "x", "body": "y"}).status_code == 403
+    assert demo.delete(f"/api/memories/{mid}").status_code == 403
+    assert demo.post(f"/api/memories/{mid}/reinforce").status_code == 403
+    assert demo.post("/api/documents", files={"file": ("a.txt", b"hello")}).status_code == 403
+    assert demo.post("/api/search", json={"query": "restart worker"}).json()["results"][0]["id"] == mid
+    assert demo.post("/api/ask", json={"question": "how to restart?"}).status_code == 200
+    assert demo.get("/api/me").json()["read_only"] is True

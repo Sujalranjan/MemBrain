@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
 
-from app.deps import SessionDep, SettingsDep, WorkspaceDep
+from app.deps import SessionDep, SettingsDep, WorkspaceDep, writable
 from app.schemas import IngestionJobOut
 from app.services import ingestion as svc
 from app.services.extraction import ExtractionError, UnsupportedDocument, detect_format
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
-@router.post("", response_model=IngestionJobOut, status_code=202)
+@router.post("", response_model=IngestionJobOut, status_code=202, dependencies=[writable])
 async def upload_document(
     request: Request,
     session: SessionDep,

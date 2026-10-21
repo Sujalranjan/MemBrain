@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -15,6 +16,8 @@ class Settings(BaseSettings):
     # requests need an API key and the key decides the workspace; create keys with `python -m app.cli`.
     workspace: str = "engineering"
     auth_enabled: bool = False
+    # Public demo mode: reads, search and Q&A work, but nothing can be created, changed or deleted.
+    read_only: bool = False
     # Token-bucket limits per API key (or per client IP when auth is disabled). /api/ask has its own,
     # tighter bucket because each call costs a model request.
     rate_limit_enabled: bool = True
@@ -70,6 +73,15 @@ class Settings(BaseSettings):
     ingestion_max_attempts: int = 3
     # A job stuck in "processing" this long is assumed to belong to a crashed worker and is retried.
     ingestion_stale_seconds: int = 600
+
+    @field_validator("database_url")
+    @classmethod
+    def use_asyncpg_driver(cls, v: str) -> str:
+        """Accept the URLs hosting providers hand out (postgres://..., ?sslmode=require) for the asyncpg driver."""
+        for scheme in ("postgres://", "postgresql://"):
+            if v.startswith(scheme):
+                v = "postgresql+asyncpg://" + v[len(scheme) :]
+        return v.replace("sslmode=", "ssl=")
 
 
 @lru_cache
