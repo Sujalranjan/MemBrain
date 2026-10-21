@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 
 from app.deps import SessionDep, SettingsDep
 from app.schemas import GraphEdge, GraphNode, GraphResponse
-from app.services.decay import current_strength
+from app.services.decay import retention
 from app.services.graph import build_graph
 
 router = APIRouter(prefix="/api", tags=["graph"])
@@ -32,7 +32,7 @@ async def graph(
                 title=m.title,
                 type=m.type,
                 tags=m.tags,
-                current_strength=round(current_strength(m.strength, m.last_accessed_at), 4),
+                retention=round(retention(m.stability, m.last_accessed_at), 4),
             )
             for m in memories
         ],

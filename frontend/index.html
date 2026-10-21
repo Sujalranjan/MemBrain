@@ -1007,6 +1007,7 @@ select option { background: #0a0a1a; }
 .decay-row:hover { background: rgba(108,79,255,0.03); }
 .decay-name { font-size: 12px; flex: 1; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .decay-pct { font-family: var(--fm); font-size: 10px; min-width: 36px; text-align: right; }
+.decay-hl { font-family: var(--fm); font-size: 9px; min-width: 38px; text-align: right; color: var(--text2); cursor: help; }
 
 /* ── EMPTY STATE ── */
 .empty {
@@ -1443,12 +1444,13 @@ function uid() { return 'mem_' + Math.random().toString(36).slice(2, 10); }
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-// m.decay is the strength recorded at m.accessed; current strength is derived, never accumulated.
-const DECAY_PER_DAY = 0.012, DECAY_FLOOR = 0.04;
+// Forgetting curve, mirroring backend/app/services/decay.py: retention = exp(-days / stability).
+const INITIAL_STABILITY = 10, MAX_STABILITY = 365;
 function strength(m) {
-  const days = (Date.now() - m.accessed) / 86400000;
-  return Math.max(DECAY_FLOOR, m.decay - days * DECAY_PER_DAY);
+  const days = Math.max(0, (Date.now() - m.accessed) / 86400000);
+  return Math.exp(-days / (m.stability || INITIAL_STABILITY));
 }
+function halfLife(m) { return (m.stability || INITIAL_STABILITY) * Math.LN2; }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function saveAll() {
@@ -1563,7 +1565,8 @@ async function api(path, { method = 'GET', body } = {}) {
 function fromApi(m) {
   return {
     id: m.id, type: m.type, title: m.title, body: m.body, tags: m.tags,
-    created: Date.parse(m.created_at), accessed: Date.parse(m.last_accessed_at), decay: m.strength
+    created: Date.parse(m.created_at), accessed: Date.parse(m.last_accessed_at),
+    stability: m.stability, accessCount: m.access_count
   };
 }
 
@@ -1600,7 +1603,7 @@ async function persistMemory({ title, body, type, tags }) {
     refreshGraph();
     return true;
   } catch (err) {
-    memories.unshift({ id: uid(), type, title, body, tags, created: Date.now(), accessed: Date.now(), decay: 1.0, localOnly: true });
+    memories.unshift({ id: uid(), type, title, body, tags, created: Date.now(), accessed: Date.now(), stability: INITIAL_STABILITY, accessCount: 0, localOnly: true });
     saveAll();
     return false;
   }
@@ -2234,6 +2237,7 @@ function renderDecay() {
         <div class="decay-name">${esc(m.title)}</div>
         <div class="decay-bar" style="width:90px"><div class="decay-fill" style="width:${m.decay * 100}%;background:${decayColor(m.decay)}"></div></div>
         <div class="decay-pct" style="color:var(--coral)">${Math.round(m.decay * 100)}%</div>
+        <div class="decay-hl" title="Half-life: retention halves every ${halfLife(m).toFixed(1)} days. It grows each time this memory is reinforced or cited in an answer.">t½ ${Math.round(halfLife(m))}d</div>
         <button class="btn btn-ghost btn-sm" onclick="reinforce('${m.id}')">Reinforce</button>
       </div>`).join('')}
     </div>`;
@@ -2247,6 +2251,7 @@ function renderDecay() {
         <div class="decay-name">${esc(m.title)}</div>
         <div class="decay-bar" style="width:90px"><div class="decay-fill" style="width:${m.decay * 100}%;background:${decayColor(m.decay)}"></div></div>
         <div class="decay-pct" style="color:var(--green)">${Math.round(m.decay * 100)}%</div>
+        <div class="decay-hl" title="Half-life: retention halves every ${halfLife(m).toFixed(1)} days. It grows each time this memory is reinforced or cited in an answer.">t½ ${Math.round(halfLife(m))}d</div>
       </div>`).join('')}
     </div>`;
   }
@@ -2259,8 +2264,9 @@ async function reinforce(id) {
   const m = memories.find(x => x.id === id);
   if (!m) return;
   if (m.localOnly) {
-    m.decay = Math.min(1, strength(m) + 0.4);
+    m.stability = Math.min(MAX_STABILITY, (m.stability || INITIAL_STABILITY) * (1.1 + 2 * (1 - strength(m))));
     m.accessed = Date.now();
+    m.accessCount = (m.accessCount || 0) + 1;
   } else {
     try {
       Object.assign(m, fromApi(await api(`/api/memories/${encodeURIComponent(id)}/reinforce`, { method: 'POST' })));

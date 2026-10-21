@@ -34,8 +34,10 @@ class MemoryOut(BaseModel):
     tags: list[str]
     created_at: datetime
     last_accessed_at: datetime
-    strength: float
-    current_strength: float
+    stability: float  # days; grows with each review
+    access_count: int
+    retention: float  # 0..1, exp(-days_since_access / stability)
+    half_life_days: float
 
 
 class SearchRequest(BaseModel):
@@ -50,7 +52,9 @@ class SearchResult(BaseModel):
     type: str
     tags: list[str]
     snippet: str
-    score: float
+    score: float  # final ranking score: relevance adjusted by retention
+    relevance: float  # fused retrieval score before the retention prior
+    retention: float
     vector_similarity: float | None
     vector_rank: int | None
     keyword_rank: int | None
@@ -90,7 +94,7 @@ class GraphNode(BaseModel):
     title: str
     type: str
     tags: list[str]
-    current_strength: float
+    retention: float
 
 
 class GraphEdge(BaseModel):

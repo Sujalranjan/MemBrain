@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Chunk, Memory
 from app.schemas import MemoryCreate, MemoryOut
 from app.services.chunking import chunk_text
-from app.services.decay import current_strength, reinforced_strength
+from app.services.decay import INITIAL_STABILITY_DAYS, half_life_days, retention, reviewed_stability
 from app.services.embeddings import Embedder
 
 
@@ -21,8 +21,10 @@ def to_out(memory: Memory) -> MemoryOut:
         tags=memory.tags,
         created_at=memory.created_at,
         last_accessed_at=memory.last_accessed_at,
-        strength=memory.strength,
-        current_strength=round(current_strength(memory.strength, memory.last_accessed_at), 4),
+        stability=round(memory.stability, 2),
+        access_count=memory.access_count,
+        retention=round(retention(memory.stability, memory.last_accessed_at), 4),
+        half_life_days=round(half_life_days(memory.stability), 1),
     )
 
 
@@ -49,7 +51,8 @@ async def create_memory(
         tags=data.tags,
         created_at=now,
         last_accessed_at=now,
-        strength=1.0,
+        stability=INITIAL_STABILITY_DAYS,
+        access_count=0,
         embedding=centroid,
         chunks=[Chunk(ordinal=i, content=c, embedding=v) for i, (c, v) in enumerate(zip(chunks, vectors, strict=True))],
     )
@@ -80,9 +83,21 @@ async def delete_memory(session: AsyncSession, workspace: str, memory_id: uuid.U
     return result.rowcount > 0
 
 
-async def reinforce_memory(session: AsyncSession, memory: Memory) -> Memory:
-    now = datetime.now(timezone.utc)
-    memory.strength = reinforced_strength(memory.strength, memory.last_accessed_at, now)
+def review(memory: Memory, now: datetime) -> None:
+    """Record a use of the memory: grow its stability per the spacing effect and reset its clock."""
+    memory.stability = reviewed_stability(memory.stability, memory.last_accessed_at, now)
     memory.last_accessed_at = now
+    memory.access_count += 1
+
+
+async def reinforce_memory(session: AsyncSession, memory: Memory) -> Memory:
+    review(memory, datetime.now(timezone.utc))
     await session.commit()
     return memory
+
+
+async def record_usage(session: AsyncSession, memories: list[Memory]) -> None:
+    now = datetime.now(timezone.utc)
+    for memory in memories:
+        review(memory, now)
+    await session.commit()

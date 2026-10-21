@@ -24,8 +24,9 @@ class Memory(Base):
     tags: Mapped[list[str]] = mapped_column(ARRAY(String(100)), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    # Strength as of last_accessed_at; current strength is derived at read time (see services/decay.py).
-    strength: Mapped[float] = mapped_column(Float, default=1.0)
+    # Forgetting-curve state (see services/decay.py): retention is derived at read time from these.
+    stability: Mapped[float] = mapped_column(Float, default=10.0)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
     # Document-level embedding (mean of chunk vectors) used for memory-to-memory similarity in the graph.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 

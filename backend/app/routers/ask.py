@@ -6,6 +6,7 @@ from app.deps import AnswererDep, EmbedderDep, SessionDep, SettingsDep
 from app.routers.search import run_search, to_result
 from app.schemas import AskRequest, AskResponse, CitationOut
 from app.services.answers import AnswerUnavailable, Source, source_excerpt
+from app.services.memories import record_usage
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["ask"])
@@ -42,6 +43,10 @@ async def ask(
         return AskResponse(
             question=req.question, answer=None, grounded=False, citations=[], sources=results, notice=str(e)
         )
+
+    # Memories the answer actually cited count as used, which slows their decay.
+    cited = {c.source for c in answer.citations if 1 <= c.source <= len(hits)}
+    await record_usage(session, [hits[n - 1].memory for n in sorted(cited)])
 
     return AskResponse(
         question=req.question,

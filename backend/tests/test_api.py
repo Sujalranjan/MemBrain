@@ -1,3 +1,10 @@
+import asyncio
+
+import asyncpg
+
+from tests.conftest import _raw_dsn
+
+
 def add(client, title, body, **kw):
     r = client.post("/api/memories", json={"title": title, "body": body, **kw})
     assert r.status_code == 201, r.text
@@ -16,7 +23,7 @@ def test_health_reports_database(client):
 
 def test_create_list_delete_roundtrip(client):
     m = add(client, "Sprint review", "We agreed to ship the billing revamp in Q3.", type="meeting", tags=["billing"])
-    assert m["current_strength"] == 1.0 and m["tags"] == ["billing"]
+    assert m["retention"] == 1.0 and m["stability"] == 10.0 and m["access_count"] == 0 and m["tags"] == ["billing"]
 
     assert [x["id"] for x in client.get("/api/memories").json()] == [m["id"]]
 
@@ -68,7 +75,8 @@ def test_workspaces_are_isolated(make_client):
 def test_reinforce(client):
     m = add(client, "Fact", "The office wifi password rotates monthly.")
     r = client.post(f"/api/memories/{m['id']}/reinforce")
-    assert r.status_code == 200 and r.json()["strength"] == 1.0
+    assert r.status_code == 200
+    assert r.json()["access_count"] == 1 and r.json()["stability"] == 11.0  # just created: base gain only
     assert client.post("/api/memories/00000000-0000-0000-0000-000000000000/reinforce").status_code == 404
 
 
@@ -141,3 +149,46 @@ def test_graph_parameters_and_deletion(client):
     client.delete(f"/api/memories/{b['id']}")
     data = client.get("/api/graph").json()
     assert [n["id"] for n in data["nodes"]] == [a["id"]] and data["edges"] == []
+
+
+def age_memory(database_url, memory_id, days):
+    async def run():
+        conn = await asyncpg.connect(_raw_dsn(database_url))
+        try:
+            await conn.execute(
+                "UPDATE memories SET last_accessed_at = now() - make_interval(days => $2) WHERE id = $1::uuid",
+                memory_id,
+                days,
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(run())
+
+
+def test_retention_breaks_ties_between_similar_memories(client, database_url):
+    add(client, "Deploy checklist", "Run migrations, then deploy the API, then purge the CDN cache.")
+    add(client, "Deploy steps", "Run migrations, then deploy the API, then purge the CDN cache.")
+    first = search(client, "migrations CDN cache")
+    age_memory(database_url, first[0]["id"], 60)
+
+    after = search(client, "migrations CDN cache")
+    assert after[0]["id"] == first[1]["id"]  # the fresh twin now outranks the stale one
+    assert after[1]["retention"] < 0.01 and after[1]["relevance"] >= after[0]["relevance"] * 0.9
+
+
+def test_relevance_still_beats_retention(client, database_url):
+    relevant = add(client, "Database failover", "Postgres failover runbook: promote the replica, repoint pgbouncer.")
+    add(client, "Lunch menu", "Tacos on Tuesday, pizza on Friday.")
+    age_memory(database_url, relevant["id"], 90)
+    top = search(client, "postgres failover replica")[0]
+    assert top["id"] == relevant["id"] and top["retention"] < 0.001
+
+
+def test_cited_memories_count_as_used(client):
+    cited = add(client, "Launch decision", "The mobile launch moves to January.")
+    other = add(client, "Lunch", "Pizza on Friday.")
+    ask(client, "when is the mobile launch")
+    by_id = {m["id"]: m for m in client.get("/api/memories").json()}
+    assert by_id[cited["id"]]["access_count"] == 1  # FakeAnswerer cites the top source
+    assert by_id[other["id"]]["access_count"] == 0

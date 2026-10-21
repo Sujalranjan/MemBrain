@@ -27,6 +27,7 @@ async def run_search(
         k=k,
         rrf_k=settings.rrf_k,
         candidate_pool=settings.candidate_pool,
+        retention_weight=settings.retention_weight,
     )
     logger.info("Search mode=%s k=%d hits=%d", mode, k, len(hits))
     return hits
@@ -40,6 +41,8 @@ def to_result(h: svc.Hit) -> SearchResult:
         tags=h.memory.tags,
         snippet=h.snippet,
         score=h.score,
+        relevance=h.relevance,
+        retention=h.retention,
         vector_similarity=h.vector_similarity,
         vector_rank=h.vector_rank,
         keyword_rank=h.keyword_rank,

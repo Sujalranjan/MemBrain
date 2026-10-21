@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     # Hybrid retrieval
     rrf_k: int = 60
     candidate_pool: int = 50
+    # Weight of the forgetting-curve prior in ranking (0 = pure relevance).
+    retention_weight: float = 0.15
 
     # Grounded answers (Claude). Read here so a key in .env works; when unset, the SDK falls back to
     # its own credential resolution (environment variables, `ant auth login` profile).
