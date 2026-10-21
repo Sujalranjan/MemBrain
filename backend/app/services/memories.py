@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chunk, Memory
@@ -10,6 +10,22 @@ from app.schemas import MemoryCreate, MemoryOut
 from app.services.chunking import chunk_text
 from app.services.decay import INITIAL_STABILITY_DAYS, half_life_days, retention, reviewed_stability
 from app.services.embeddings import Embedder
+
+# Postings for BM25, derived from the generated tsvector so keyword matching and ranking share one
+# tokeniser (English stemming, stopwords removed). Title lexemes carry weight 'A' and count double.
+INDEX_TERMS_SQL = text(
+    """
+    WITH postings AS (
+        INSERT INTO memory_terms (memory_id, lexeme, workspace, tf)
+        SELECT m.id, t.lexeme, m.workspace,
+               cardinality(t.positions) + (SELECT count(*) FROM unnest(t.weights) AS w WHERE w = 'A')
+        FROM memories AS m, unnest(m.search_tsv) AS t
+        WHERE m.id = :id
+        RETURNING tf
+    )
+    UPDATE memories SET term_count = (SELECT coalesce(sum(tf), 0) FROM postings) WHERE id = :id
+    """
+)
 
 
 def to_out(memory: Memory) -> MemoryOut:
@@ -83,11 +99,11 @@ async def store_memory(
         chunks=[Chunk(ordinal=i, content=c, embedding=v) for i, (c, v) in enumerate(zip(chunks, vectors, strict=True))],
     )
     session.add(memory)
+    await session.flush()
+    await session.execute(INDEX_TERMS_SQL, {"id": memory.id})
     if commit:
         await session.commit()
         await session.refresh(memory)
-    else:
-        await session.flush()
     return memory
 
 

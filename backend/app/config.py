@@ -25,7 +25,12 @@ class Settings(BaseSettings):
 
     # Hybrid retrieval
     rrf_k: int = 60
+    # Weight of the keyword ranking relative to the vector ranking in fusion; tuned with eval/ (see README).
+    keyword_weight: float = 1.0
     candidate_pool: int = 50
+    # BM25 keyword ranking parameters (textbook defaults; results were insensitive to them on SciFact).
+    bm25_k1: float = 1.2
+    bm25_b: float = 0.75
     # Weight of the forgetting-curve prior in ranking (0 = pure relevance).
     retention_weight: float = 0.15
 
