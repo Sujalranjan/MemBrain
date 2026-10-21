@@ -71,7 +71,7 @@ async def _ensure_database(url: str) -> None:
 async def _truncate(url: str) -> None:
     conn = await asyncpg.connect(_raw_dsn(url))
     try:
-        await conn.execute("TRUNCATE memories CASCADE")
+        await conn.execute("TRUNCATE memories, ingestion_jobs CASCADE")
     finally:
         await conn.close()
 
@@ -99,10 +99,9 @@ def make_client(database_url, answerer):
     asyncio.run(_truncate(database_url))
     clients = []
 
-    def _make(workspace: str = "test") -> TestClient:
-        app = create_app(
-            Settings(database_url=database_url, workspace=workspace), embedder=FakeEmbedder(), answerer=answerer
-        )
+    def _make(workspace: str = "test", **overrides) -> TestClient:
+        settings = Settings(database_url=database_url, workspace=workspace, ingestion_poll_seconds=0.2, **overrides)
+        app = create_app(settings, embedder=FakeEmbedder(), answerer=answerer)
         c = TestClient(app)
         c.__enter__()
         clients.append(c)

@@ -110,3 +110,23 @@ class GraphResponse(BaseModel):
     neighbors: int
     margin: float
     min_similarity: float
+
+
+class IngestionJobOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    filename: str
+    content_type: str | None
+    size_bytes: int
+    title: str
+    type: str
+    tags: list[str]
+    status: Literal["queued", "processing", "succeeded", "failed"]
+    attempts: int
+    error: str | None
+    chars: int | None  # extracted text length, once processed
+    memory_id: uuid.UUID | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None

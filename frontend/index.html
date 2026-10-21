@@ -648,6 +648,17 @@ select option { background: #0a0a1a; }
 .drop-icon { font-size: 32px; margin-bottom: 10px; filter: drop-shadow(0 0 10px rgba(108,79,255,0.4)); }
 .drop-text { font-size: 13px; color: var(--text2); font-weight: 500; }
 .drop-hint { font-family: var(--fm); font-size: 10px; color: var(--text3); margin-top: 6px; }
+.jobs { display: flex; flex-direction: column; gap: 6px; }
+.job { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px; }
+.job-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.job-meta { font-family: var(--fm); font-size: 10px; color: var(--text2); white-space: nowrap; }
+.job-status { font-family: var(--fm); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 10px; border: 1px solid currentColor; white-space: nowrap; }
+.job-status.queued, .job-status.processing { color: var(--amber); }
+.job-status.succeeded { color: var(--green); }
+.job-status.failed { color: var(--coral); }
+.job-error { flex-basis: 100%; color: var(--coral); font-size: 11px; }
+.job { flex-wrap: wrap; }
+.job-empty { color: var(--text2); font-size: 12px; }
 
 /* ── MIC AREA ── */
 .mic-area {
@@ -1240,14 +1251,13 @@ select option { background: #0a0a1a; }
     </div>
 
     <div class="panel" id="panel-file">
-      <div><div class="sec-title">File Import</div><div class="sec-sub">Upload documents for semantic extraction</div></div>
+      <div><div class="sec-title">File Import</div><div class="sec-sub">Text is extracted, chunked and indexed in the background</div></div>
       <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event)">
         <div class="drop-icon">📎</div>
-        <div class="drop-text">Drop files here or click to browse</div>
-        <div class="drop-hint">TXT · MD · CSV — Max 10 MB</div>
-        <input type="file" id="file-input" style="display:none" accept=".txt,.md,.csv" onchange="fileSelected(event)"/>
+        <div class="drop-text" id="drop-text">Drop a file here or click to browse</div>
+        <div class="drop-hint">PDF · DOCX · TXT · MD · CSV — Max 10 MB</div>
+        <input type="file" id="file-input" style="display:none" accept=".pdf,.docx,.txt,.md,.markdown,.csv,.log" onchange="fileSelected(event)"/>
       </div>
-      <div class="ig"><label class="lbl">Extracted Content</label><textarea id="f-body" rows="6" placeholder="File content..."></textarea></div>
       <div class="two-col">
         <div class="ig"><label class="lbl">Title</label><input type="text" id="f-title" placeholder="Title..."/></div>
         <div class="ig"><label class="lbl">Type</label>
@@ -1255,7 +1265,8 @@ select option { background: #0a0a1a; }
         </div>
       </div>
       <div class="ig"><label class="lbl">Additional Tags</label><input type="text" id="f-tags" placeholder="e.g. Q3, contract"/></div>
-      <div><button class="btn btn-primary" onclick="saveFile()">Index in Membrain</button></div>
+      <div><button class="btn btn-primary" id="f-btn" onclick="saveFile()">Upload &amp; Index</button></div>
+      <div class="ig"><label class="lbl">Recent Imports</label><div class="jobs" id="jobs-list"><div class="job-empty">No imports yet.</div></div></div>
     </div>
 
     <div class="panel" id="panel-browse">
@@ -1522,6 +1533,7 @@ document.querySelectorAll('.nav-item[data-panel]').forEach(el => {
     if (id === 'browse') renderBrowse();
     if (id === 'graph') refreshGraph().then(() => setTimeout(renderGraph, 50));
     if (id === 'decay') renderDecay();
+    if (id === 'file') loadJobs();
   });
 });
 
@@ -1853,27 +1865,109 @@ function dragOver(e) { e.preventDefault(); document.getElementById('drop-zone').
 function dragLeave() { document.getElementById('drop-zone').classList.remove('drag-over'); }
 function dropFile(e) { e.preventDefault(); document.getElementById('drop-zone').classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if (f) processFile(f); }
 function fileSelected(e) { const f = e.target.files[0]; if (f) processFile(f); }
-async function processFile(file) {
-  try {
-    const t = await file.text();
-    document.getElementById('f-body').value = t.slice(0, 4000);
-    document.getElementById('f-title').value = file.name;
-    toast('📎 File extracted.');
-  } catch (e) {
-    document.getElementById('f-body').value = 'Failed to extract. Please paste manually.';
+const TEXT_EXT = /\.(txt|md|markdown|csv|log)$/i;
+let selectedFile = null;
+let jobs = [];
+const jobTimers = {};
+
+function fmtBytes(n) { return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`; }
+
+function processFile(file) {
+  if (file.size > 10 * 1024 * 1024) { toast('⚠️ File exceeds 10 MB'); return; }
+  selectedFile = file;
+  document.getElementById('drop-text').textContent = `${file.name} · ${fmtBytes(file.size)}`;
+  if (!document.getElementById('f-title').value.trim()) {
+    document.getElementById('f-title').value = file.name.replace(/\.[^.]+$/, '');
   }
 }
+
+function renderJobs() {
+  const el = document.getElementById('jobs-list');
+  if (!jobs.length) { el.innerHTML = '<div class="job-empty">No imports yet.</div>'; return; }
+  el.innerHTML = jobs.map(j => {
+    const meta = j.status === 'succeeded' ? `${(j.chars || 0).toLocaleString()} chars` : fmtBytes(j.size_bytes);
+    return `<div class="job">
+      <div class="job-name" title="${esc(j.filename)}">${esc(j.title)} <span class="job-meta">${esc(j.filename)}</span></div>
+      <div class="job-meta">${meta}</div>
+      <div class="job-status ${esc(j.status)}">${esc(j.status)}</div>
+      ${j.error && j.status === 'failed' ? `<div class="job-error">${esc(j.error)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function upsertJob(job) {
+  jobs = [job, ...jobs.filter(j => j.id !== job.id)].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 20);
+  renderJobs();
+}
+
+// Polls a job until the background worker finishes it, then refreshes the knowledge base.
+function watchJob(id) {
+  if (jobTimers[id]) return;
+  jobTimers[id] = setInterval(async () => {
+    try {
+      const job = await api(`/api/documents/jobs/${id}`);
+      upsertJob(job);
+      if (job.status !== 'succeeded' && job.status !== 'failed') return;
+      clearInterval(jobTimers[id]);
+      delete jobTimers[id];
+      if (job.status === 'succeeded') {
+        toast(`📎 "${job.title}" indexed`);
+        loadMemories();
+      } else {
+        toast(`⚠️ Import failed: ${job.error}`, 6000);
+      }
+    } catch (err) { /* transient; keep polling */ }
+  }, 1000);
+}
+
+async function loadJobs() {
+  try {
+    jobs = await api('/api/documents/jobs?limit=20');
+    renderJobs();
+    jobs.filter(j => j.status === 'queued' || j.status === 'processing').forEach(j => watchJob(j.id));
+  } catch (err) { /* offline: keep whatever is shown */ }
+}
+
+function resetFileForm() {
+  selectedFile = null;
+  document.getElementById('file-input').value = '';
+  document.getElementById('drop-text').textContent = 'Drop a file here or click to browse';
+  document.getElementById('f-title').value = '';
+  document.getElementById('f-tags').value = '';
+}
+
 async function saveFile() {
-  const body = document.getElementById('f-body').value.trim();
+  if (!selectedFile) { toast('⚠️ Choose a file first'); return; }
   const title = document.getElementById('f-title').value.trim();
   const type = document.getElementById('f-type').value;
   const tags = document.getElementById('f-tags').value.trim().split(',').map(t => t.trim()).filter(Boolean);
-  if (!body) return;
-  const synced = await persistMemory({ title: title || 'Uploaded file', body, type, tags: [...tags, 'file'] });
-  document.getElementById('f-body').value = '';
-  document.getElementById('f-title').value = '';
-  document.getElementById('f-tags').value = '';
-  toast(synced ? '📎 File saved!' : '📎 File saved locally (offline mode)');
+  const form = new FormData();
+  form.append('file', selectedFile);
+  if (title) form.append('title', title);
+  form.append('type', type);
+  form.append('tags', [...tags, 'file'].join(','));
+
+  const btn = document.getElementById('f-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/documents', { method: 'POST', body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(`⚠️ ${typeof data.detail === 'string' ? data.detail : 'Upload rejected (HTTP ' + res.status + ')'}`, 6000); return; }
+    upsertJob(data);
+    watchJob(data.id);
+    toast('📎 Uploaded — indexing in the background');
+    resetFileForm();
+  } catch (err) {
+    // Offline: plain-text files can still be kept locally and synced later; binary formats need the server.
+    if (!TEXT_EXT.test(selectedFile.name)) { toast('⚠️ Backend unreachable — PDF and DOCX imports need the server'); return; }
+    const body = (await selectedFile.text()).trim();
+    if (!body) { toast('⚠️ File is empty'); return; }
+    await persistMemory({ title: title || selectedFile.name, body, type, tags: [...tags, 'file'] });
+    toast('📎 File saved locally (offline mode)');
+    resetFileForm();
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ══════════════════════════════════════════════

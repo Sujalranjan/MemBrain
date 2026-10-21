@@ -8,7 +8,8 @@ MemBrain captures unstructured team knowledge (meeting notes, decisions, SOPs, v
 
 ## Features
 
-- **Multi-modal capture:** text, voice (on-device speech-to-text via the Web Speech API), and file import
+- **Multi-modal capture:** text, voice (on-device speech-to-text via the Web Speech API), and documents (PDF, DOCX, Markdown, text)
+- **Background document ingestion:** uploads return immediately; a worker extracts, chunks and embeds them from a Postgres-backed job queue (`FOR UPDATE SKIP LOCKED`), with retries and crash recovery
 - **Hybrid semantic search:** dense vector search (pgvector + local BGE embeddings) fused with Postgres full-text search using Reciprocal Rank Fusion
 - **Chunked indexing:** long documents are split into overlapping chunks, so a fact buried deep in a long note is still retrievable
 - **Grounded Q&A with citations:** answers come only from your memories, and every claim links to the exact passage it came from (Claude with the Citations API)
@@ -24,7 +25,9 @@ flowchart LR
     UI["Frontend<br/>HTML/CSS/JS, Canvas graph"] -->|REST| API["FastAPI"]
     API --> EMB["fastembed<br/>BGE-small (ONNX, local)"]
     API -->|"/api/ask"| LLM["Claude<br/>Citations API"]
-    API -->|async SQLAlchemy| PG[("PostgreSQL 16<br/>pgvector + tsvector")]
+    API -->|async SQLAlchemy| PG[("PostgreSQL 16<br/>pgvector + tsvector<br/>+ job queue")]
+    W["Ingestion worker<br/>pypdf, python-docx"] -->|claim jobs| PG
+    W --> EMB
     UI -.->|offline cache| LS[("localStorage")]
 ```
 
@@ -41,6 +44,16 @@ flowchart LR
 3. **Fusion:** Reciprocal Rank Fusion, `score(d) = Σ 1 / (k + rank_d)` with `k = 60`. RRF needs no score calibration between retrievers. Vector search catches paraphrases ("why did the site go down?" finds an outage postmortem); keyword search catches exact terms, names and IDs that embeddings blur.
 4. A light forgetting-curve prior is applied (see [How memory decay works](#how-memory-decay-works)).
 5. Each result reports *why* it matched (`matched_by`, `vector_rank`, `keyword_rank`, `vector_similarity`, `relevance`, `retention`). `mode` can be set to `vector` or `keyword` to compare retrievers.
+
+### How document ingestion works
+
+`POST /api/documents` (`app/routers/documents.py`, `app/services/ingestion.py`, `app/services/extraction.py`):
+1. The upload is validated up front: size limit (10 MB), a supported extension, **and a matching file signature** (a `.pdf` must start with `%PDF-`, a `.docx` must be a zip), so a mislabelled file is rejected with `415`/`422` before any work is queued.
+2. The file is stored in an `ingestion_jobs` row and the API answers **`202 Accepted`** with a job id. Extraction and embedding a long PDF take seconds, so they don't happen in the request.
+3. A worker claims the oldest queued job with `UPDATE … WHERE id = (SELECT … FOR UPDATE SKIP LOCKED LIMIT 1)`. Postgres is the queue, so no Redis or broker is needed, and **any number of workers can run concurrently without processing a job twice**. The worker runs inside the API process by default and wakes immediately on upload; set `INGESTION_WORKER=false` and run `python -m app.worker` to move it into separate processes.
+4. Text is extracted (pypdf for PDFs, including empty-password encrypted ones; python-docx for Word, keeping tables in reading order), normalized, then chunked and embedded like any memory. The memory and the job's `succeeded` status are committed **in one transaction**, so a crash never leaves one without the other.
+5. Failures are classified. A bad file (corrupt, password-protected, scanned with no text layer) fails at once with a readable error, since retrying can't help. An infrastructure error is requeued and retried up to 3 times. A job whose worker died mid-way is reclaimed after 10 minutes. The upload bytes are deleted once a job finishes.
+6. Clients poll `GET /api/documents/jobs/{id}`. The UI shows a live list of recent imports.
 
 ### How answers work
 
@@ -90,6 +103,9 @@ Raw cosine scores from a small embedding model fall in a narrow band (0.42–0.6
 | `/api/search` | POST | Hybrid search: `{ "query": "...", "k": 6, "mode": "hybrid" \| "vector" \| "keyword" }` |
 | `/api/ask` | POST | Cited answer from your memories: `{ "question": "..." }` |
 | `/api/graph` | GET | Knowledge graph: nodes and similarity-weighted edges (`neighbors`, `margin`, `min_similarity` optional) |
+| `/api/documents` | POST | Upload a PDF/DOCX/text file (multipart `file`, optional `title`, `type`, `tags`); returns `202` with a job |
+| `/api/documents/jobs` | GET | Recent ingestion jobs (`limit`) |
+| `/api/documents/jobs/{id}` | GET | Job status: `queued`, `processing`, `succeeded` (with `memory_id`) or `failed` (with `error`) |
 | `/health` | GET | Liveness check, including database connectivity |
 
 Interactive docs are at `http://127.0.0.1:8000/docs`.
@@ -134,6 +150,9 @@ Every setting has a working local default. Override them through environment var
 | `ANSWER_MODEL` / `ANSWER_EFFORT` | `claude-opus-5-5` / `low` | Model and effort level used for answers |
 | `ANSWER_SOURCES` / `ANSWER_MAX_SOURCE_CHARS` | `6` / `6000` | Memories sent per question, and the per-memory size cap |
 | `GRAPH_NEIGHBORS` / `GRAPH_MARGIN` / `GRAPH_MIN_SIMILARITY` | `3` / `0.01` / `0.5` | Graph edge selection (see above) |
+| `MAX_UPLOAD_BYTES` / `MAX_DOCUMENT_CHARS` | `10485760` / `300000` | Upload size limit, and the limit on extracted text per document |
+| `INGESTION_WORKER` | `true` | Run the ingestion worker inside the API process; set `false` when running `python -m app.worker` separately |
+| `INGESTION_MAX_ATTEMPTS` / `INGESTION_STALE_SECONDS` | `3` / `600` | Retries for transient failures, and when an abandoned job is reclaimed |
 | `LOG_LEVEL` | `INFO` | Logging level |
 
 ## Testing
@@ -145,7 +164,7 @@ pytest          # unit tests always run; API tests use the docker compose Postgr
 ruff check .
 ```
 
-The API tests run against a real Postgres (a separate `membrain_test` database, created automatically) with a deterministic fake embedder and a fake answerer, so they're fast, free, and don't need the model or an API key. They are skipped if Postgres isn't reachable.
+The API tests run against a real Postgres (a separate `membrain_test` database, created automatically) with a deterministic fake embedder and a fake answerer, so they're fast, free, and don't need the model or an API key. They are skipped if Postgres isn't reachable. Ingestion tests generate real PDF and DOCX files, and simulate crashed workers and flaky embedders to cover reclaiming, retries and giving up.
 
 ## Project Structure
 
@@ -153,10 +172,11 @@ The API tests run against a real Postgres (a separate `membrain_test` database, 
 backend/
   app/
     main.py            # app factory, lifespan, health
+    worker.py          # standalone ingestion worker (python -m app.worker)
     config.py          # pydantic-settings
-    models.py          # Memory, Chunk (pgvector, tsvector)
+    models.py          # Memory, Chunk (pgvector, tsvector), IngestionJob
     schemas.py         # request/response models
-    routers/           # memories, search, ask, graph
+    routers/           # memories, search, ask, graph, documents
     services/
       chunking.py      # paragraph/sentence-aware chunker
       embeddings.py    # Embedder protocol + fastembed implementation
@@ -164,6 +184,8 @@ backend/
       answers.py       # grounded answers with citations (Claude)
       graph.py         # kNN graph over memory embeddings, rank-based edges
       memories.py      # CRUD and reinforcement
+      extraction.py    # PDF/DOCX/text extraction with signature checks
+      ingestion.py     # Postgres job queue (SKIP LOCKED) and background worker
       decay.py         # forgetting-curve model (retention, spaced-repetition stability)
   alembic/             # migrations
   tests/
@@ -174,7 +196,7 @@ docker-compose.yml
 ## Tech Stack
 
 - **Frontend:** HTML5, CSS3 (glassmorphism), vanilla JavaScript, Canvas API (custom force-directed graph), Web Speech API
-- **Backend:** Python, FastAPI, Pydantic v2, SQLAlchemy 2 (async) + asyncpg, Alembic
+- **Backend:** Python, FastAPI, Pydantic v2, SQLAlchemy 2 (async) + asyncpg, Alembic, pypdf, python-docx
 - **AI:** Claude (Anthropic Python SDK, Citations API)
 - **Retrieval:** PostgreSQL 16, pgvector (HNSW), Postgres full-text search, fastembed (BGE-small, ONNX)
 - **Tooling:** pytest, ruff, Docker Compose
@@ -192,7 +214,7 @@ The retrieval layer was then rebuilt in-house: local embeddings, pgvector, Postg
 - [x] LLM answers with source citations
 - [x] Server-side knowledge graph (embedding-similarity edges)
 - [x] Forgetting-curve decay model used in ranking
-- [ ] PDF/DOCX ingestion via a background worker
+- [x] PDF/DOCX ingestion via a background worker
 - [ ] Containerized API, GitHub Actions CI
 - [ ] Auth and real multi-tenant workspaces
 - [ ] Retrieval quality evaluation (recall@k / MRR) and live demo deployment

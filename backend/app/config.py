@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     graph_margin: float = 0.01
     graph_min_similarity: float = 0.5
 
+    # Document ingestion (PDF, DOCX, text). Uploads are queued in Postgres and processed by a background
+    # worker. It runs inside the API process by default; set `ingestion_worker=false` there and run
+    # `python -m app.worker` to process jobs in separate processes instead.
+    max_upload_bytes: int = 10 * 1024 * 1024
+    max_document_chars: int = 300_000
+    ingestion_worker: bool = True
+    ingestion_poll_seconds: float = 2.0
+    ingestion_max_attempts: int = 3
+    # A job stuck in "processing" this long is assumed to belong to a crashed worker and is retried.
+    ingestion_stale_seconds: int = 600
+
 
 @lru_cache
 def get_settings() -> Settings:

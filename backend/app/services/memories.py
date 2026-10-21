@@ -37,18 +37,44 @@ async def create_memory(
     chunk_size: int,
     chunk_overlap: int,
 ) -> Memory:
-    chunks = chunk_text(data.body, size=chunk_size, overlap=chunk_overlap)
+    return await store_memory(
+        session,
+        embedder,
+        workspace,
+        title=data.title,
+        body=data.body,
+        type=data.type,
+        tags=data.tags,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+
+
+async def store_memory(
+    session: AsyncSession,
+    embedder: Embedder,
+    workspace: str,
+    *,
+    title: str,
+    body: str,
+    type: str,
+    tags: list[str],
+    chunk_size: int,
+    chunk_overlap: int,
+    commit: bool = True,
+) -> Memory:
+    chunks = chunk_text(body, size=chunk_size, overlap=chunk_overlap)
     # The title is embedded with every chunk so each one carries its document's context.
-    vectors = await run_in_threadpool(embedder.embed_documents, [f"{data.title}\n\n{c}" for c in chunks])
+    vectors = await run_in_threadpool(embedder.embed_documents, [f"{title}\n\n{c}" for c in chunks])
     centroid = [sum(dim) / len(vectors) for dim in zip(*vectors, strict=True)]
 
     now = datetime.now(timezone.utc)
     memory = Memory(
         workspace=workspace,
-        title=data.title,
-        body=data.body,
-        type=data.type,
-        tags=data.tags,
+        title=title,
+        body=body,
+        type=type,
+        tags=tags,
         created_at=now,
         last_accessed_at=now,
         stability=INITIAL_STABILITY_DAYS,
@@ -57,8 +83,11 @@ async def create_memory(
         chunks=[Chunk(ordinal=i, content=c, embedding=v) for i, (c, v) in enumerate(zip(chunks, vectors, strict=True))],
     )
     session.add(memory)
-    await session.commit()
-    await session.refresh(memory)
+    if commit:
+        await session.commit()
+        await session.refresh(memory)
+    else:
+        await session.flush()
     return memory
 
 

@@ -9,9 +9,10 @@ from sqlalchemy import text
 from app.config import REPO_DIR, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
 from app.models import EMBEDDING_DIM
-from app.routers import ask, graph, memories, search
+from app.routers import ask, documents, graph, memories, search
 from app.services.answers import Answerer, ClaudeAnswerer
 from app.services.embeddings import Embedder, FastEmbedEmbedder
+from app.services.ingestion import IngestionWorker
 
 logger = logging.getLogger("membrain")
 
@@ -36,11 +37,17 @@ def create_app(
             settings.answer_timeout_seconds,
             api_key=settings.anthropic_api_key,
         )
+        app.state.worker = None
+        if settings.ingestion_worker:
+            app.state.worker = IngestionWorker(app.state.sessionmaker, app.state.embedder, settings)
+            app.state.worker.start()
         logger.info("Ready: model=%s workspace=%s", settings.embedding_model, settings.workspace)
         yield
+        if app.state.worker:
+            await app.state.worker.stop()
         await engine.dispose()
 
-    app = FastAPI(title="MemBrain API", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="MemBrain API", version="0.4.0", lifespan=lifespan)
     app.dependency_overrides[get_settings] = lambda: settings
     app.add_middleware(
         CORSMiddleware,
@@ -52,6 +59,7 @@ def create_app(
     app.include_router(search.router)
     app.include_router(ask.router)
     app.include_router(graph.router)
+    app.include_router(documents.router)
 
     @app.get("/", include_in_schema=False)
     async def serve_ui():
