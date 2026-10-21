@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check --output-format=github .
+      - run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: membrain
+          POSTGRES_PASSWORD: membrain
+          POSTGRES_DB: membrain
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U membrain"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://membrain:membrain@localhost:5432/membrain_test
+      # Fail instead of skipping the integration tests if Postgres is unreachable.
+      REQUIRE_TEST_DATABASE: "1"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest --cov=app --cov-report=term-missing:skip-covered --cov-report=markdown-append:$GITHUB_STEP_SUMMARY
+
+  docker:
+    # Builds the production image and runs a smoke test against it with the real embedding model.
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: membrain:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Start stack
+        run: docker compose up -d --no-build --wait --wait-timeout 180
+      - name: Smoke test
+        run: ./scripts/smoke_test.sh http://localhost:8000
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v

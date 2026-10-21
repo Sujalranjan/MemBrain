@@ -9,13 +9,17 @@ from sqlalchemy import text
 from app.config import REPO_DIR, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
 from app.models import EMBEDDING_DIM
-from app.routers import memories, search
+from app.routers import ask, documents, graph, memories, search
+from app.services.answers import Answerer, ClaudeAnswerer
 from app.services.embeddings import Embedder, FastEmbedEmbedder
+from app.services.ingestion import IngestionWorker
 
 logger = logging.getLogger("membrain")
 
 
-def create_app(settings: Settings | None = None, embedder: Embedder | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, embedder: Embedder | None = None, answerer: Answerer | None = None
+) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -26,11 +30,24 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         app.state.embedder = embedder or FastEmbedEmbedder(settings.embedding_model)
         if app.state.embedder.dim != EMBEDDING_DIM:
             raise RuntimeError(f"Embedding model returns {app.state.embedder.dim} dims; schema expects {EMBEDDING_DIM}")
+        app.state.answerer = answerer or ClaudeAnswerer(
+            settings.answer_model,
+            settings.answer_effort,
+            settings.answer_max_tokens,
+            settings.answer_timeout_seconds,
+            api_key=settings.anthropic_api_key,
+        )
+        app.state.worker = None
+        if settings.ingestion_worker:
+            app.state.worker = IngestionWorker(app.state.sessionmaker, app.state.embedder, settings)
+            app.state.worker.start()
         logger.info("Ready: model=%s workspace=%s", settings.embedding_model, settings.workspace)
         yield
+        if app.state.worker:
+            await app.state.worker.stop()
         await engine.dispose()
 
-    app = FastAPI(title="MemBrain API", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="MemBrain API", version="0.4.0", lifespan=lifespan)
     app.dependency_overrides[get_settings] = lambda: settings
     app.add_middleware(
         CORSMiddleware,
@@ -40,6 +57,9 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     )
     app.include_router(memories.router)
     app.include_router(search.router)
+    app.include_router(ask.router)
+    app.include_router(graph.router)
+    app.include_router(documents.router)
 
     @app.get("/", include_in_schema=False)
     async def serve_ui():

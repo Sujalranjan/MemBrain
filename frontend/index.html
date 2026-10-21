@@ -648,6 +648,17 @@ select option { background: #0a0a1a; }
 .drop-icon { font-size: 32px; margin-bottom: 10px; filter: drop-shadow(0 0 10px rgba(108,79,255,0.4)); }
 .drop-text { font-size: 13px; color: var(--text2); font-weight: 500; }
 .drop-hint { font-family: var(--fm); font-size: 10px; color: var(--text3); margin-top: 6px; }
+.jobs { display: flex; flex-direction: column; gap: 6px; }
+.job { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px; }
+.job-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.job-meta { font-family: var(--fm); font-size: 10px; color: var(--text2); white-space: nowrap; }
+.job-status { font-family: var(--fm); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 10px; border: 1px solid currentColor; white-space: nowrap; }
+.job-status.queued, .job-status.processing { color: var(--amber); }
+.job-status.succeeded { color: var(--green); }
+.job-status.failed { color: var(--coral); }
+.job-error { flex-basis: 100%; color: var(--coral); font-size: 11px; }
+.job { flex-wrap: wrap; }
+.job-empty { color: var(--text2); font-size: 12px; }
 
 /* ── MIC AREA ── */
 .mic-area {
@@ -891,6 +902,12 @@ select option { background: #0a0a1a; }
   border-bottom-left-radius: 3px;
 }
 
+.cite { display: inline-block; min-width: 15px; margin: 0 1px; padding: 0 4px; border-radius: 4px; background: rgba(108,79,255,0.18); color: var(--accent3); font-family: var(--fm); font-size: 9px; line-height: 15px; text-align: center; cursor: help; }
+.qa-sources { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.qa-source { font-size: 11px; color: var(--text2); line-height: 1.5; }
+.qa-source strong { color: var(--text); margin: 0 6px 0 4px; }
+.qa-source q { font-style: italic; }
+.qa-note { color: var(--text2); font-size: 11px; }
 .qa-bottom { display: flex; gap: 8px; flex-shrink: 0; }
 .qa-bottom input { flex: 1; }
 
@@ -1001,6 +1018,7 @@ select option { background: #0a0a1a; }
 .decay-row:hover { background: rgba(108,79,255,0.03); }
 .decay-name { font-size: 12px; flex: 1; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .decay-pct { font-family: var(--fm); font-size: 10px; min-width: 36px; text-align: right; }
+.decay-hl { font-family: var(--fm); font-size: 9px; min-width: 38px; text-align: right; color: var(--text2); cursor: help; }
 
 /* ── EMPTY STATE ── */
 .empty {
@@ -1233,14 +1251,13 @@ select option { background: #0a0a1a; }
     </div>
 
     <div class="panel" id="panel-file">
-      <div><div class="sec-title">File Import</div><div class="sec-sub">Upload documents for semantic extraction</div></div>
+      <div><div class="sec-title">File Import</div><div class="sec-sub">Text is extracted, chunked and indexed in the background</div></div>
       <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event)">
         <div class="drop-icon">📎</div>
-        <div class="drop-text">Drop files here or click to browse</div>
-        <div class="drop-hint">TXT · MD · CSV — Max 10 MB</div>
-        <input type="file" id="file-input" style="display:none" accept=".txt,.md,.csv" onchange="fileSelected(event)"/>
+        <div class="drop-text" id="drop-text">Drop a file here or click to browse</div>
+        <div class="drop-hint">PDF · DOCX · TXT · MD · CSV — Max 10 MB</div>
+        <input type="file" id="file-input" style="display:none" accept=".pdf,.docx,.txt,.md,.markdown,.csv,.log" onchange="fileSelected(event)"/>
       </div>
-      <div class="ig"><label class="lbl">Extracted Content</label><textarea id="f-body" rows="6" placeholder="File content..."></textarea></div>
       <div class="two-col">
         <div class="ig"><label class="lbl">Title</label><input type="text" id="f-title" placeholder="Title..."/></div>
         <div class="ig"><label class="lbl">Type</label>
@@ -1248,7 +1265,8 @@ select option { background: #0a0a1a; }
         </div>
       </div>
       <div class="ig"><label class="lbl">Additional Tags</label><input type="text" id="f-tags" placeholder="e.g. Q3, contract"/></div>
-      <div><button class="btn btn-primary" onclick="saveFile()">Index in Membrain</button></div>
+      <div><button class="btn btn-primary" id="f-btn" onclick="saveFile()">Upload &amp; Index</button></div>
+      <div class="ig"><label class="lbl">Recent Imports</label><div class="jobs" id="jobs-list"><div class="job-empty">No imports yet.</div></div></div>
     </div>
 
     <div class="panel" id="panel-browse">
@@ -1427,21 +1445,23 @@ let memories = JSON.parse(localStorage.getItem('md_v2') || '[]');
 let selTypeVal = 'meeting';
 let mediaRecorder = null, audioChunks = [], recInterval = null, recSeconds = 0;
 let graphAF = null;
+let graphData = null;  // server-computed semantic graph; null when offline (falls back to getRelated)
 let scale = 1, offsetX = 0, offsetY = 0;
 let isDragging = false, startX = 0, startY = 0;
 
-const QA_TIMEOUT_MS = 10000;
+const QA_TIMEOUT_MS = 60000;  // retrieval plus answer generation
 
 function uid() { return 'mem_' + Math.random().toString(36).slice(2, 10); }
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-// m.decay is the strength recorded at m.accessed; current strength is derived, never accumulated.
-const DECAY_PER_DAY = 0.012, DECAY_FLOOR = 0.04;
+// Forgetting curve, mirroring backend/app/services/decay.py: retention = exp(-days / stability).
+const INITIAL_STABILITY = 10, MAX_STABILITY = 365;
 function strength(m) {
-  const days = (Date.now() - m.accessed) / 86400000;
-  return Math.max(DECAY_FLOOR, m.decay - days * DECAY_PER_DAY);
+  const days = Math.max(0, (Date.now() - m.accessed) / 86400000);
+  return Math.exp(-days / (m.stability || INITIAL_STABILITY));
 }
+function halfLife(m) { return (m.stability || INITIAL_STABILITY) * Math.LN2; }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function saveAll() {
@@ -1483,9 +1503,13 @@ function updateStats() {
     countEl.classList.add('stat-flash');
   }
 
-  let links = 0;
-  memories.forEach(m => { links += getRelated(m).length; });
-  linksEl.textContent = Math.floor(links / 2);
+  if (graphData) {
+    linksEl.textContent = graphData.edges.length;
+  } else {
+    let links = 0;
+    memories.forEach(m => { links += getRelated(m).length; });
+    linksEl.textContent = Math.floor(links / 2);
+  }
   fadeEl.textContent = memories.filter(m => strength(m) < 0.4).length;
 }
 
@@ -1507,8 +1531,9 @@ document.querySelectorAll('.nav-item[data-panel]').forEach(el => {
     el.classList.add('active');
     document.getElementById('topbar-title').textContent = TITLES[id];
     if (id === 'browse') renderBrowse();
-    if (id === 'graph') setTimeout(renderGraph, 100);
+    if (id === 'graph') refreshGraph().then(() => setTimeout(renderGraph, 50));
     if (id === 'decay') renderDecay();
+    if (id === 'file') loadJobs();
   });
 });
 
@@ -1552,8 +1577,18 @@ async function api(path, { method = 'GET', body } = {}) {
 function fromApi(m) {
   return {
     id: m.id, type: m.type, title: m.title, body: m.body, tags: m.tags,
-    created: Date.parse(m.created_at), accessed: Date.parse(m.last_accessed_at), decay: m.strength
+    created: Date.parse(m.created_at), accessed: Date.parse(m.last_accessed_at),
+    stability: m.stability, accessCount: m.access_count
   };
+}
+
+async function refreshGraph() {
+  try {
+    graphData = await api('/api/graph');
+  } catch (err) {
+    graphData = null;
+  }
+  updateStats();
 }
 
 async function loadMemories() {
@@ -1564,6 +1599,7 @@ async function loadMemories() {
     }
     memories = (await api('/api/memories?limit=1000')).map(fromApi);
     saveAll();
+    refreshGraph();
   } catch (err) {
     updateStats();
     if (memories.length) toast('⚠️ Backend unreachable — showing cached memories');
@@ -1576,9 +1612,10 @@ async function persistMemory({ title, body, type, tags }) {
     const saved = await api('/api/memories', { method: 'POST', body: { title, body, type, tags } });
     memories.unshift(fromApi(saved));
     saveAll();
+    refreshGraph();
     return true;
   } catch (err) {
-    memories.unshift({ id: uid(), type, title, body, tags, created: Date.now(), accessed: Date.now(), decay: 1.0, localOnly: true });
+    memories.unshift({ id: uid(), type, title, body, tags, created: Date.now(), accessed: Date.now(), stability: INITIAL_STABILITY, accessCount: 0, localOnly: true });
     saveAll();
     return false;
   }
@@ -1680,33 +1717,16 @@ async function sendQA() {
   const timer = setTimeout(() => ctrl.abort(), QA_TIMEOUT_MS);
 
   try {
-    const res = await fetch('/api/search', {
+    const res = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q }),
+      body: JSON.stringify({ question: q }),
       signal: ctrl.signal
     });
     clearTimeout(timer);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-
-    let answer = data.answer || null;
-    let answerHtml = null;
-    if (!answer) {
-      const results = data.results || data.memories || data.items || data.data || [];
-      if (results.length) {
-        const lines = results.slice(0, 3).map(r => {
-          const { title, body } = extractResult(r);
-          return `• <strong>${esc(title)}</strong>: ${esc((body || '').slice(0, 120))}`;
-        }).join('<br>');
-        answerHtml = `Based on ${results.length} relevant memor${results.length > 1 ? 'ies' : 'y'} found:<br><br>${lines}`;
-      } else {
-        answerHtml = "I searched your Membrain knowledge base but couldn't find relevant information. Try adding more knowledge first.";
-      }
-    }
-
     const bubble = document.getElementById(tid);
-    if (bubble) bubble.innerHTML = answerHtml ?? esc(answer).replace(/\n/g, '<br>');
+    if (bubble) bubble.innerHTML = renderAnswer(await res.json());
 
   } catch (err) {
     clearTimeout(timer);
@@ -1729,6 +1749,26 @@ async function sendQA() {
     sendBtn.disabled = false;
     document.getElementById('qa-btn-txt').textContent = 'Ask';
   }
+}
+
+// Answer text is escaped first; only the server's [n] citation markers become markup.
+function renderAnswer(data) {
+  const sources = data.sources || [];
+  if (data.answer == null) {
+    const lines = sources.slice(0, 3).map(s => `• <strong>${esc(s.title)}</strong>: ${esc(s.snippet.slice(0, 120))}`).join('<br>');
+    const note = `<em class="qa-note">${esc(data.notice || 'AI answers unavailable')} — showing the closest memories instead.</em>`;
+    return lines ? `${note}<br><br>${lines}` : note;
+  }
+  let html = esc(data.answer).replace(/\n/g, '<br>')
+    .replace(/\[(\d+)\]/g, (m, n) => sources[n - 1] ? `<sup class="cite" title="${esc(sources[n - 1].title)}">${n}</sup>` : '');
+  const cited = [...new Set((data.citations || []).map(c => c.source))];
+  if (cited.length) {
+    html += '<div class="qa-sources">' + cited.map(n => {
+      const quotes = data.citations.filter(c => c.source === n).map(c => `<q>${esc(c.cited_text)}</q>`).join(' ');
+      return `<div class="qa-source"><sup class="cite">${n}</sup><strong>${esc(sources[n - 1].title)}</strong> ${quotes}</div>`;
+    }).join('') + '</div>';
+  }
+  return html;
 }
 
 function addBubble(cls, html, id = '') {
@@ -1825,27 +1865,109 @@ function dragOver(e) { e.preventDefault(); document.getElementById('drop-zone').
 function dragLeave() { document.getElementById('drop-zone').classList.remove('drag-over'); }
 function dropFile(e) { e.preventDefault(); document.getElementById('drop-zone').classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if (f) processFile(f); }
 function fileSelected(e) { const f = e.target.files[0]; if (f) processFile(f); }
-async function processFile(file) {
-  try {
-    const t = await file.text();
-    document.getElementById('f-body').value = t.slice(0, 4000);
-    document.getElementById('f-title').value = file.name;
-    toast('📎 File extracted.');
-  } catch (e) {
-    document.getElementById('f-body').value = 'Failed to extract. Please paste manually.';
+const TEXT_EXT = /\.(txt|md|markdown|csv|log)$/i;
+let selectedFile = null;
+let jobs = [];
+const jobTimers = {};
+
+function fmtBytes(n) { return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`; }
+
+function processFile(file) {
+  if (file.size > 10 * 1024 * 1024) { toast('⚠️ File exceeds 10 MB'); return; }
+  selectedFile = file;
+  document.getElementById('drop-text').textContent = `${file.name} · ${fmtBytes(file.size)}`;
+  if (!document.getElementById('f-title').value.trim()) {
+    document.getElementById('f-title').value = file.name.replace(/\.[^.]+$/, '');
   }
 }
+
+function renderJobs() {
+  const el = document.getElementById('jobs-list');
+  if (!jobs.length) { el.innerHTML = '<div class="job-empty">No imports yet.</div>'; return; }
+  el.innerHTML = jobs.map(j => {
+    const meta = j.status === 'succeeded' ? `${(j.chars || 0).toLocaleString()} chars` : fmtBytes(j.size_bytes);
+    return `<div class="job">
+      <div class="job-name" title="${esc(j.filename)}">${esc(j.title)} <span class="job-meta">${esc(j.filename)}</span></div>
+      <div class="job-meta">${meta}</div>
+      <div class="job-status ${esc(j.status)}">${esc(j.status)}</div>
+      ${j.error && j.status === 'failed' ? `<div class="job-error">${esc(j.error)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function upsertJob(job) {
+  jobs = [job, ...jobs.filter(j => j.id !== job.id)].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 20);
+  renderJobs();
+}
+
+// Polls a job until the background worker finishes it, then refreshes the knowledge base.
+function watchJob(id) {
+  if (jobTimers[id]) return;
+  jobTimers[id] = setInterval(async () => {
+    try {
+      const job = await api(`/api/documents/jobs/${id}`);
+      upsertJob(job);
+      if (job.status !== 'succeeded' && job.status !== 'failed') return;
+      clearInterval(jobTimers[id]);
+      delete jobTimers[id];
+      if (job.status === 'succeeded') {
+        toast(`📎 "${job.title}" indexed`);
+        loadMemories();
+      } else {
+        toast(`⚠️ Import failed: ${job.error}`, 6000);
+      }
+    } catch (err) { /* transient; keep polling */ }
+  }, 1000);
+}
+
+async function loadJobs() {
+  try {
+    jobs = await api('/api/documents/jobs?limit=20');
+    renderJobs();
+    jobs.filter(j => j.status === 'queued' || j.status === 'processing').forEach(j => watchJob(j.id));
+  } catch (err) { /* offline: keep whatever is shown */ }
+}
+
+function resetFileForm() {
+  selectedFile = null;
+  document.getElementById('file-input').value = '';
+  document.getElementById('drop-text').textContent = 'Drop a file here or click to browse';
+  document.getElementById('f-title').value = '';
+  document.getElementById('f-tags').value = '';
+}
+
 async function saveFile() {
-  const body = document.getElementById('f-body').value.trim();
+  if (!selectedFile) { toast('⚠️ Choose a file first'); return; }
   const title = document.getElementById('f-title').value.trim();
   const type = document.getElementById('f-type').value;
   const tags = document.getElementById('f-tags').value.trim().split(',').map(t => t.trim()).filter(Boolean);
-  if (!body) return;
-  const synced = await persistMemory({ title: title || 'Uploaded file', body, type, tags: [...tags, 'file'] });
-  document.getElementById('f-body').value = '';
-  document.getElementById('f-title').value = '';
-  document.getElementById('f-tags').value = '';
-  toast(synced ? '📎 File saved!' : '📎 File saved locally (offline mode)');
+  const form = new FormData();
+  form.append('file', selectedFile);
+  if (title) form.append('title', title);
+  form.append('type', type);
+  form.append('tags', [...tags, 'file'].join(','));
+
+  const btn = document.getElementById('f-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/documents', { method: 'POST', body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(`⚠️ ${typeof data.detail === 'string' ? data.detail : 'Upload rejected (HTTP ' + res.status + ')'}`, 6000); return; }
+    upsertJob(data);
+    watchJob(data.id);
+    toast('📎 Uploaded — indexing in the background');
+    resetFileForm();
+  } catch (err) {
+    // Offline: plain-text files can still be kept locally and synced later; binary formats need the server.
+    if (!TEXT_EXT.test(selectedFile.name)) { toast('⚠️ Backend unreachable — PDF and DOCX imports need the server'); return; }
+    const body = (await selectedFile.text()).trim();
+    if (!body) { toast('⚠️ File is empty'); return; }
+    await persistMemory({ title: title || selectedFile.name, body, type, tags: [...tags, 'file'] });
+    toast('📎 File saved locally (offline mode)');
+    resetFileForm();
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -1898,6 +2020,7 @@ async function deleteMem(id) {
   }
   memories = memories.filter(m => m.id !== id);
   saveAll();
+  if (mem && !mem.localOnly) refreshGraph();
   renderBrowse();
   toast('Memory deleted.');
 }
@@ -1961,16 +2084,27 @@ function renderGraph() {
   }));
 
   const edges = [];
-  nodes.forEach(n => {
-    getRelated(n.m).slice(0, 2).forEach(r => {
-      const target = nodes.find(x => x.id === r.id);
-      if(target && target !== n) {
-        if(!edges.find(e => (e.a===n && e.b===target) || (e.a===target && e.b===n))) {
-           edges.push({a: n, b: target, alpha: 0});
-        }
-      }
+  if (graphData) {
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const floor = graphData.min_similarity;
+    graphData.edges.forEach(e => {
+      const a = byId.get(e.source), b = byId.get(e.target);
+      if (!a || !b) return;
+      const w = Math.max(0, Math.min(1, (e.similarity - floor) / Math.max(1e-6, 1 - floor)));
+      edges.push({ a, b, alpha: 0, rest: 110 - 60 * w, weight: 0.5 + w });
     });
-  });
+  } else {
+    nodes.forEach(n => {
+      getRelated(n.m).slice(0, 2).forEach(r => {
+        const target = nodes.find(x => x.id === r.id);
+        if(target && target !== n) {
+          if(!edges.find(e => (e.a===n && e.b===target) || (e.a===target && e.b===n))) {
+             edges.push({a: n, b: target, alpha: 0, rest: 70, weight: 1});
+          }
+        }
+      });
+    });
+  }
 
   let mouse = {x: -1000, y: -1000, down: false};
   let hoveredNode = null;
@@ -2063,7 +2197,7 @@ function renderGraph() {
     edges.forEach(e => {
       const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
       const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-      const force = (dist - 70) * 0.015;
+      const force = (dist - e.rest) * 0.015;
       if(e.a !== draggedNode) { e.a.vx += (dx/dist) * force; e.a.vy += (dy/dist) * force; }
       if(e.b !== draggedNode) { e.b.vx -= (dx/dist) * force; e.b.vy -= (dy/dist) * force; }
     });
@@ -2106,7 +2240,7 @@ function renderGraph() {
         ctx.strokeStyle = `rgba(108,79,255,${0.03 * e.alpha})`;
         ctx.lineWidth = 1 / scale;
       } else {
-        ctx.strokeStyle = `rgba(108,79,255,${0.18 * e.alpha})`;
+        ctx.strokeStyle = `rgba(108,79,255,${Math.min(0.5, 0.18 * e.weight) * e.alpha})`;
         ctx.lineWidth = 1 / scale;
       }
       ctx.stroke();
@@ -2197,6 +2331,7 @@ function renderDecay() {
         <div class="decay-name">${esc(m.title)}</div>
         <div class="decay-bar" style="width:90px"><div class="decay-fill" style="width:${m.decay * 100}%;background:${decayColor(m.decay)}"></div></div>
         <div class="decay-pct" style="color:var(--coral)">${Math.round(m.decay * 100)}%</div>
+        <div class="decay-hl" title="Half-life: retention halves every ${halfLife(m).toFixed(1)} days. It grows each time this memory is reinforced or cited in an answer.">t½ ${Math.round(halfLife(m))}d</div>
         <button class="btn btn-ghost btn-sm" onclick="reinforce('${m.id}')">Reinforce</button>
       </div>`).join('')}
     </div>`;
@@ -2210,6 +2345,7 @@ function renderDecay() {
         <div class="decay-name">${esc(m.title)}</div>
         <div class="decay-bar" style="width:90px"><div class="decay-fill" style="width:${m.decay * 100}%;background:${decayColor(m.decay)}"></div></div>
         <div class="decay-pct" style="color:var(--green)">${Math.round(m.decay * 100)}%</div>
+        <div class="decay-hl" title="Half-life: retention halves every ${halfLife(m).toFixed(1)} days. It grows each time this memory is reinforced or cited in an answer.">t½ ${Math.round(halfLife(m))}d</div>
       </div>`).join('')}
     </div>`;
   }
@@ -2222,8 +2358,9 @@ async function reinforce(id) {
   const m = memories.find(x => x.id === id);
   if (!m) return;
   if (m.localOnly) {
-    m.decay = Math.min(1, strength(m) + 0.4);
+    m.stability = Math.min(MAX_STABILITY, (m.stability || INITIAL_STABILITY) * (1.1 + 2 * (1 - strength(m))));
     m.accessed = Date.now();
+    m.accessCount = (m.accessCount || 0) + 1;
   } else {
     try {
       Object.assign(m, fromApi(await api(`/api/memories/${encodeURIComponent(id)}/reinforce`, { method: 'POST' })));

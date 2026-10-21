@@ -1,3 +1,6 @@
+# Full stack:      docker compose up --build            -> http://localhost:8000
+# Database only:   docker compose up -d db              (for running the API locally with uvicorn)
+# Separate workers: INGESTION_WORKER=false docker compose --profile workers up --build --scale worker=2
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -6,7 +9,7 @@ services:
       POSTGRES_PASSWORD: membrain
       POSTGRES_DB: membrain
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,6 +17,38 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  api:
+    build: .
+    image: membrain:latest
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://membrain:membrain@db:5432/membrain
+      INGESTION_WORKER: ${INGESTION_WORKER:-true}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    image: membrain:latest
+    command: ["worker"]
+    profiles: ["workers"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://membrain:membrain@db:5432/membrain
+      RUN_MIGRATIONS: "false"
+    # The image's healthcheck probes the HTTP API, which a worker doesn't serve.
+    healthcheck:
+      disable: true
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   pgdata:

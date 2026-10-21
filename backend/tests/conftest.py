@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.config import BACKEND_DIR, Settings
 from app.main import create_app
+from app.services.answers import Answer, AnswerUnavailable, Citation
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL", "postgresql+asyncpg://membrain:membrain@localhost:5432/membrain_test"
@@ -38,6 +39,21 @@ class FakeEmbedder:
         return self._embed(text)
 
 
+class FakeAnswerer:
+    """Cites the first sentence of the top source; set `fail` to simulate an unavailable provider."""
+
+    def __init__(self):
+        self.calls = []
+        self.fail = False
+
+    async def answer(self, question, sources):
+        self.calls.append((question, sources))
+        if self.fail:
+            raise AnswerUnavailable("Anthropic credentials are not configured")
+        quote = sources[0].text.split(".")[0]
+        return Answer(text=f"{quote}.[1]", citations=[Citation(source=1, cited_text=quote)], model="fake-model")
+
+
 def _raw_dsn(url: str) -> str:
     return url.replace("postgresql+asyncpg://", "postgresql://")
 
@@ -55,7 +71,7 @@ async def _ensure_database(url: str) -> None:
 async def _truncate(url: str) -> None:
     conn = await asyncpg.connect(_raw_dsn(url))
     try:
-        await conn.execute("TRUNCATE memories CASCADE")
+        await conn.execute("TRUNCATE memories, ingestion_jobs CASCADE")
     finally:
         await conn.close()
 
@@ -65,6 +81,8 @@ def database_url():
     try:
         asyncio.run(_ensure_database(TEST_DATABASE_URL))
     except (OSError, asyncpg.PostgresError, asyncio.TimeoutError) as e:
+        if os.getenv("REQUIRE_TEST_DATABASE"):
+            raise
         pytest.skip(f"Postgres not available for integration tests: {e}")
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
@@ -74,12 +92,18 @@ def database_url():
 
 
 @pytest.fixture
-def make_client(database_url):
+def answerer():
+    return FakeAnswerer()
+
+
+@pytest.fixture
+def make_client(database_url, answerer):
     asyncio.run(_truncate(database_url))
     clients = []
 
-    def _make(workspace: str = "test") -> TestClient:
-        app = create_app(Settings(database_url=database_url, workspace=workspace), embedder=FakeEmbedder())
+    def _make(workspace: str = "test", **overrides) -> TestClient:
+        settings = Settings(database_url=database_url, workspace=workspace, ingestion_poll_seconds=0.2, **overrides)
+        app = create_app(settings, embedder=FakeEmbedder(), answerer=answerer)
         c = TestClient(app)
         c.__enter__()
         clients.append(c)

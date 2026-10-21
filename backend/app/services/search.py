@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chunk, Memory
+from app.services.decay import retention
 
 SearchMode = Literal["hybrid", "vector", "keyword"]
 
@@ -13,7 +14,9 @@ SearchMode = Literal["hybrid", "vector", "keyword"]
 @dataclass
 class Hit:
     memory: Memory
-    score: float  # fused score normalised to 0..1 (1.0 = ranked first by every retriever)
+    score: float  # final score: relevance x retention prior
+    relevance: float  # fused score normalised to 0..1 (1.0 = ranked first by every retriever)
+    retention: float
     snippet: str
     vector_similarity: float | None = None
     vector_rank: int | None = None
@@ -75,7 +78,12 @@ async def search(
     k: int = 6,
     rrf_k: int = 60,
     candidate_pool: int = 50,
+    retention_weight: float = 0.0,
 ) -> list[Hit]:
+    """Hybrid retrieval, then a light retention prior: score = relevance * (1 - w + w * retention).
+
+    With a small w, relevance dominates; between similarly relevant memories, ones in active use win.
+    """
     vec = await vector_candidates(session, workspace, query_vec, candidate_pool) if mode != "keyword" else []
     kw = await keyword_candidates(session, workspace, query, candidate_pool) if mode != "vector" else []
 
@@ -84,9 +92,14 @@ async def search(
         return []
     fused = reciprocal_rank_fusion(rankings, k=rrf_k)
     best_possible = len(rankings) / (rrf_k + 1)
-    top_ids = sorted(fused, key=fused.get, reverse=True)[:k]
+    # Re-rank a wider pool than k so the prior can promote a memory from just outside the cut.
+    pool_ids = sorted(fused, key=fused.get, reverse=True)[: max(k * 3, 20)]
+    memories = {m.id: m for m in (await session.scalars(select(Memory).where(Memory.id.in_(pool_ids))))}
+    relevance = {mid: fused[mid] / best_possible for mid in pool_ids}
+    kept = {mid: retention(memories[mid].stability, memories[mid].last_accessed_at) for mid in pool_ids}
+    final = {mid: relevance[mid] * (1 - retention_weight + retention_weight * kept[mid]) for mid in pool_ids}
+    top_ids = sorted(pool_ids, key=lambda mid: (final[mid], relevance[mid]), reverse=True)[:k]
 
-    memories = {m.id: m for m in (await session.scalars(select(Memory).where(Memory.id.in_(top_ids))))}
     vec_info = {mid: (rank, content, sim) for rank, (mid, content, sim) in enumerate(vec, start=1)}
     kw_info = {mid: (rank, snip) for rank, (mid, snip) in enumerate(kw, start=1)}
 
@@ -96,7 +109,9 @@ async def search(
         hits.append(
             Hit(
                 memory=memories[mid],
-                score=round(fused[mid] / best_possible, 4),
+                score=round(final[mid], 4),
+                relevance=round(relevance[mid], 4),
+                retention=round(kept[mid], 4),
                 # Prefer the semantically closest chunk; fall back to the keyword highlight.
                 snippet=v[1] if v else w[1],
                 vector_similarity=round(v[2], 4) if v else None,
