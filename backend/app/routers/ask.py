@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter
 
-from app.deps import AnswererDep, EmbedderDep, SessionDep, SettingsDep
+from app.deps import AnswererDep, EmbedderDep, SessionDep, SettingsDep, WorkspaceDep, ask_rate_limit
 from app.routers.search import run_search, to_result
 from app.schemas import AskRequest, AskResponse, CitationOut
 from app.services.answers import AnswerUnavailable, Source, source_excerpt
@@ -14,13 +14,18 @@ router = APIRouter(prefix="/api", tags=["ask"])
 NO_MEMORIES = "I couldn't find any memories related to that question. Try capturing the relevant knowledge first."
 
 
-@router.post("/ask", response_model=AskResponse)
+@router.post("/ask", response_model=AskResponse, dependencies=[ask_rate_limit])
 async def ask(
-    req: AskRequest, session: SessionDep, embedder: EmbedderDep, answerer: AnswererDep, settings: SettingsDep
+    req: AskRequest,
+    session: SessionDep,
+    embedder: EmbedderDep,
+    answerer: AnswererDep,
+    settings: SettingsDep,
+    workspace: WorkspaceDep,
 ):
     """Retrieve the most relevant memories, then answer from them with verifiable citations."""
     hits = await run_search(
-        session, embedder, settings, req.question, mode="hybrid", k=req.k or settings.answer_sources
+        session, embedder, settings, workspace, req.question, mode="hybrid", k=req.k or settings.answer_sources
     )
     results = [to_result(h) for h in hits]
     if not hits:

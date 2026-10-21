@@ -27,6 +27,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://membrain:membrain@db:5432/membrain
       INGESTION_WORKER: ${INGESTION_WORKER:-true}
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

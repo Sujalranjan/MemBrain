@@ -71,7 +71,7 @@ async def _ensure_database(url: str) -> None:
 async def _truncate(url: str) -> None:
     conn = await asyncpg.connect(_raw_dsn(url))
     try:
-        await conn.execute("TRUNCATE memories, ingestion_jobs CASCADE")
+        await conn.execute("TRUNCATE memories, ingestion_jobs, workspaces, rate_limits CASCADE")
     finally:
         await conn.close()
 
@@ -102,6 +102,8 @@ def make_client(database_url, answerer):
     clients = []
 
     def _make(workspace: str = "test", **overrides) -> TestClient:
+        # Rate limiting is exercised in its own tests; elsewhere it would throttle polling loops.
+        overrides = {"rate_limit_enabled": False, **overrides}
         settings = Settings(database_url=database_url, workspace=workspace, ingestion_poll_seconds=0.2, **overrides)
         app = create_app(settings, embedder=FakeEmbedder(), answerer=answerer)
         c = TestClient(app)

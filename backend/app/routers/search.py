@@ -5,7 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.deps import EmbedderDep, SessionDep, SettingsDep
+from app.deps import EmbedderDep, SessionDep, SettingsDep, WorkspaceDep
 from app.schemas import SearchRequest, SearchResponse, SearchResult
 from app.services import search as svc
 from app.services.embeddings import Embedder
@@ -15,12 +15,19 @@ router = APIRouter(prefix="/api", tags=["search"])
 
 
 async def run_search(
-    session: AsyncSession, embedder: Embedder, settings: Settings, query: str, *, mode: svc.SearchMode, k: int
+    session: AsyncSession,
+    embedder: Embedder,
+    settings: Settings,
+    workspace: str,
+    query: str,
+    *,
+    mode: svc.SearchMode,
+    k: int,
 ) -> list[svc.Hit]:
     query_vec = await run_in_threadpool(embedder.embed_query, query) if mode != "keyword" else None
     hits = await svc.search(
         session,
-        settings.workspace,
+        workspace,
         query,
         query_vec,
         mode=mode,
@@ -54,6 +61,8 @@ def to_result(h: svc.Hit) -> SearchResult:
 
 
 @router.post("/search", response_model=SearchResponse)
-async def search(req: SearchRequest, session: SessionDep, embedder: EmbedderDep, settings: SettingsDep):
-    hits = await run_search(session, embedder, settings, req.query, mode=req.mode, k=req.k)
+async def search(
+    req: SearchRequest, session: SessionDep, embedder: EmbedderDep, settings: SettingsDep, workspace: WorkspaceDep
+):
+    hits = await run_search(session, embedder, settings, workspace, req.query, mode=req.mode, k=req.k)
     return SearchResponse(query=req.query, mode=req.mode, results=[to_result(h) for h in hits])

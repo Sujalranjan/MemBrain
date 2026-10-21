@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
 
-from app.deps import SessionDep, SettingsDep
+from app.deps import SessionDep, SettingsDep, WorkspaceDep
 from app.schemas import IngestionJobOut
 from app.services import ingestion as svc
 from app.services.extraction import ExtractionError, UnsupportedDocument, detect_format
@@ -19,6 +19,7 @@ async def upload_document(
     request: Request,
     session: SessionDep,
     settings: SettingsDep,
+    workspace: WorkspaceDep,
     file: UploadFile,
     title: Annotated[str | None, Form(max_length=300)] = None,
     memory_type: Annotated[str, Form(alias="type", min_length=1, max_length=50)] = "file",
@@ -41,7 +42,7 @@ async def upload_document(
 
     job = await svc.enqueue(
         session,
-        settings.workspace,
+        workspace,
         filename=filename,
         content_type=file.content_type,
         data=data,
@@ -56,13 +57,13 @@ async def upload_document(
 
 
 @router.get("/jobs", response_model=list[IngestionJobOut])
-async def list_jobs(session: SessionDep, settings: SettingsDep, limit: Annotated[int, Query(ge=1, le=100)] = 20):
-    return await svc.list_jobs(session, settings.workspace, limit)
+async def list_jobs(session: SessionDep, workspace: WorkspaceDep, limit: Annotated[int, Query(ge=1, le=100)] = 20):
+    return await svc.list_jobs(session, workspace, limit)
 
 
 @router.get("/jobs/{job_id}", response_model=IngestionJobOut)
-async def get_job(job_id: uuid.UUID, session: SessionDep, settings: SettingsDep):
-    job = await svc.get_job(session, settings.workspace, job_id)
+async def get_job(job_id: uuid.UUID, session: SessionDep, workspace: WorkspaceDep):
+    job = await svc.get_job(session, workspace, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
