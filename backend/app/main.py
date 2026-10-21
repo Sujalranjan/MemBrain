@@ -9,13 +9,16 @@ from sqlalchemy import text
 from app.config import REPO_DIR, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
 from app.models import EMBEDDING_DIM
-from app.routers import memories, search
+from app.routers import ask, memories, search
+from app.services.answers import Answerer, ClaudeAnswerer
 from app.services.embeddings import Embedder, FastEmbedEmbedder
 
 logger = logging.getLogger("membrain")
 
 
-def create_app(settings: Settings | None = None, embedder: Embedder | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, embedder: Embedder | None = None, answerer: Answerer | None = None
+) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -26,6 +29,13 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         app.state.embedder = embedder or FastEmbedEmbedder(settings.embedding_model)
         if app.state.embedder.dim != EMBEDDING_DIM:
             raise RuntimeError(f"Embedding model returns {app.state.embedder.dim} dims; schema expects {EMBEDDING_DIM}")
+        app.state.answerer = answerer or ClaudeAnswerer(
+            settings.answer_model,
+            settings.answer_effort,
+            settings.answer_max_tokens,
+            settings.answer_timeout_seconds,
+            api_key=settings.anthropic_api_key,
+        )
         logger.info("Ready: model=%s workspace=%s", settings.embedding_model, settings.workspace)
         yield
         await engine.dispose()
@@ -40,6 +50,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     )
     app.include_router(memories.router)
     app.include_router(search.router)
+    app.include_router(ask.router)
 
     @app.get("/", include_in_schema=False)
     async def serve_ui():

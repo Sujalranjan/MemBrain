@@ -49,5 +49,25 @@ class SearchResponse(BaseModel):
     query: str
     mode: str
     results: list[SearchResult]
-    # Populated once LLM answer synthesis lands; the frontend falls back to listing results.
-    answer: str | None = None
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2_000)
+    k: int | None = Field(default=None, ge=1, le=20)
+
+
+class CitationOut(BaseModel):
+    source: int  # 1-based index into `sources`, matching the [n] markers in `answer`
+    memory_id: uuid.UUID
+    title: str
+    cited_text: str
+
+
+class AskResponse(BaseModel):
+    question: str
+    answer: str | None  # None when answer generation is unavailable; `sources` are still returned
+    grounded: bool
+    citations: list[CitationOut]
+    sources: list[SearchResult]
+    model: str | None = None
+    notice: str | None = None

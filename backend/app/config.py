@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     rrf_k: int = 60
     candidate_pool: int = 50
 
+    # Grounded answers (Claude). Read here so a key in .env works; when unset, the SDK falls back to
+    # its own credential resolution (environment variables, `ant auth login` profile).
+    anthropic_api_key: str | None = None
+    answer_model: str = "claude-opus-5-5"
+    answer_effort: str = "low"
+    answer_max_tokens: int = 8000
+    answer_timeout_seconds: float = 60.0
+    answer_sources: int = 6
+    answer_max_source_chars: int = 6000
+
 
 @lru_cache
 def get_settings() -> Settings:

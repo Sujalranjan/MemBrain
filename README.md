@@ -11,10 +11,11 @@ MemBrain captures unstructured team knowledge (meeting notes, decisions, SOPs, v
 - **Multi-modal capture:** text, voice (on-device speech-to-text via the Web Speech API), and file import
 - **Hybrid semantic search:** dense vector search (pgvector + local BGE embeddings) fused with Postgres full-text search using Reciprocal Rank Fusion
 - **Chunked indexing:** long documents are split into overlapping chunks, so a fact buried deep in a long note is still retrievable
+- **Grounded Q&A with citations:** answers come only from your memories, and every claim links to the exact passage it came from (Claude with the Citations API)
 - **Knowledge graph:** a hand-written force-directed physics simulation on Canvas, with zoom and pan
 - **Memory decay:** memories lose strength over time unless reinforced, so stale knowledge is surfaced for review
 - **Offline-tolerant UI:** cached memories stay visible, and memories captured offline sync automatically when the backend returns
-- **No external AI dependency:** embeddings run locally on CPU (ONNX); no API keys or per-request cost
+- **Local-first retrieval:** embeddings and search run locally on CPU (ONNX). Only answer generation calls an external model, and the app works without it
 
 ## Architecture
 
@@ -22,6 +23,7 @@ MemBrain captures unstructured team knowledge (meeting notes, decisions, SOPs, v
 flowchart LR
     UI["Frontend<br/>HTML/CSS/JS, Canvas graph"] -->|REST| API["FastAPI"]
     API --> EMB["fastembed<br/>BGE-small (ONNX, local)"]
+    API -->|"/api/ask"| LLM["Claude<br/>Citations API"]
     API -->|async SQLAlchemy| PG[("PostgreSQL 16<br/>pgvector + tsvector")]
     UI -.->|offline cache| LS[("localStorage")]
 ```
@@ -39,6 +41,15 @@ flowchart LR
 3. **Fusion:** Reciprocal Rank Fusion, `score(d) = Σ 1 / (k + rank_d)` with `k = 60`. RRF needs no score calibration between retrievers. Vector search catches paraphrases ("why did the site go down?" finds an outage postmortem); keyword search catches exact terms, names and IDs that embeddings blur.
 4. Each result reports *why* it matched (`matched_by`, `vector_rank`, `keyword_rank`, `vector_similarity`). `mode` can be set to `vector` or `keyword` to compare retrievers.
 
+### How answers work
+
+`POST /api/ask` (`app/routers/ask.py`, `app/services/answers.py`):
+1. Runs the hybrid search above and takes the top memories (6 by default).
+2. Sends each memory to Claude as a separate plain-text **document with citations enabled**. Long memories are trimmed to a window around the retrieved chunk.
+3. The system prompt restricts answers to those documents, asks the model to say when they don't contain the answer, and treats memory text as data rather than instructions, which guards against prompt injection from stored content.
+4. The API returns text blocks with `char_location` citations that point at exact spans of the source documents. The backend turns them into `[n]` markers and a list of `{source, memory_id, title, cited_text}`. Because the citations are structured API output, never parsed from free text, every quote is guaranteed to exist in the cited memory.
+5. An answer with no citations is flagged `grounded: false`. Without credentials, or if the model call fails, the endpoint still returns the retrieved memories with a `notice`, so the UI degrades instead of erroring.
+
 ### API
 
 | Endpoint | Method | Description |
@@ -48,6 +59,7 @@ flowchart LR
 | `/api/memories/{id}` | DELETE | Delete a memory and its chunks |
 | `/api/memories/{id}/reinforce` | POST | Boost a memory's strength |
 | `/api/search` | POST | Hybrid search: `{ "query": "...", "k": 6, "mode": "hybrid" \| "vector" \| "keyword" }` |
+| `/api/ask` | POST | Cited answer from your memories: `{ "question": "..." }` |
 | `/health` | GET | Liveness check, including database connectivity |
 
 Interactive docs are at `http://127.0.0.1:8000/docs`.
@@ -73,6 +85,8 @@ uvicorn app.main:app --reload
 
 Open **http://127.0.0.1:8000**. The first start downloads the embedding model (~130 MB), which is cached afterwards.
 
+To enable AI answers in **Ask Anything**, put `ANTHROPIC_API_KEY=...` in a `.env` file at the repo root (see [`.env.example`](.env.example)). Everything else works without it.
+
 ## Configuration
 
 Every setting has a working local default. Override them through environment variables or `.env` (see [`.env.example`](.env.example)).
@@ -85,6 +99,9 @@ Every setting has a working local default. Override them through environment var
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `150` | Chunking parameters (characters) |
 | `RRF_K` / `CANDIDATE_POOL` | `60` / `50` | Fusion constant and per-retriever candidate count |
 | `CORS_ORIGINS` | `["http://localhost:8000","http://127.0.0.1:8000"]` | Allowed browser origins (JSON list) |
+| `ANTHROPIC_API_KEY` | — | Enables generated answers; without it, Ask Anything lists the closest memories |
+| `ANSWER_MODEL` / `ANSWER_EFFORT` | `claude-opus-5-5` / `low` | Model and effort level used for answers |
+| `ANSWER_SOURCES` / `ANSWER_MAX_SOURCE_CHARS` | `6` / `6000` | Memories sent per question, and the per-memory size cap |
 | `LOG_LEVEL` | `INFO` | Logging level |
 
 ## Testing
@@ -96,7 +113,7 @@ pytest          # unit tests always run; API tests use the docker compose Postgr
 ruff check .
 ```
 
-The API tests run against a real Postgres (a separate `membrain_test` database, created automatically) with a deterministic fake embedder, so they're fast and don't need the model. They are skipped if Postgres isn't reachable.
+The API tests run against a real Postgres (a separate `membrain_test` database, created automatically) with a deterministic fake embedder and a fake answerer, so they're fast, free, and don't need the model or an API key. They are skipped if Postgres isn't reachable.
 
 ## Project Structure
 
@@ -107,11 +124,12 @@ backend/
     config.py          # pydantic-settings
     models.py          # Memory, Chunk (pgvector, tsvector)
     schemas.py         # request/response models
-    routers/           # memories, search
+    routers/           # memories, search, ask
     services/
       chunking.py      # paragraph/sentence-aware chunker
       embeddings.py    # Embedder protocol + fastembed implementation
       search.py        # vector + keyword retrieval, RRF fusion
+      answers.py       # grounded answers with citations (Claude)
       memories.py      # CRUD and reinforcement
       decay.py         # strength model
   alembic/             # migrations
@@ -124,6 +142,7 @@ docker-compose.yml
 
 - **Frontend:** HTML5, CSS3 (glassmorphism), vanilla JavaScript, Canvas API (custom force-directed graph), Web Speech API
 - **Backend:** Python, FastAPI, Pydantic v2, SQLAlchemy 2 (async) + asyncpg, Alembic
+- **AI:** Claude (Anthropic Python SDK, Citations API)
 - **Retrieval:** PostgreSQL 16, pgvector (HNSW), Postgres full-text search, fastembed (BGE-small, ONNX)
 - **Tooling:** pytest, ruff, Docker Compose
 
@@ -137,7 +156,7 @@ The retrieval layer was then rebuilt in-house: local embeddings, pgvector, Postg
 
 - [x] Hardening: input validation, async I/O, CORS lockdown, XSS fixes, config via env
 - [x] Self-hosted retrieval: local embeddings, pgvector, hybrid full-text + vector search with RRF
-- [ ] LLM answers with source citations
+- [x] LLM answers with source citations
 - [ ] Server-side knowledge graph (embedding-similarity edges)
 - [ ] Forgetting-curve decay model used in ranking
 - [ ] PDF/DOCX ingestion via a background worker

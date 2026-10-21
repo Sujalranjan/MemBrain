@@ -891,6 +891,12 @@ select option { background: #0a0a1a; }
   border-bottom-left-radius: 3px;
 }
 
+.cite { display: inline-block; min-width: 15px; margin: 0 1px; padding: 0 4px; border-radius: 4px; background: rgba(108,79,255,0.18); color: var(--accent3); font-family: var(--fm); font-size: 9px; line-height: 15px; text-align: center; cursor: help; }
+.qa-sources { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.qa-source { font-size: 11px; color: var(--text2); line-height: 1.5; }
+.qa-source strong { color: var(--text); margin: 0 6px 0 4px; }
+.qa-source q { font-style: italic; }
+.qa-note { color: var(--text2); font-size: 11px; }
 .qa-bottom { display: flex; gap: 8px; flex-shrink: 0; }
 .qa-bottom input { flex: 1; }
 
@@ -1430,7 +1436,7 @@ let graphAF = null;
 let scale = 1, offsetX = 0, offsetY = 0;
 let isDragging = false, startX = 0, startY = 0;
 
-const QA_TIMEOUT_MS = 10000;
+const QA_TIMEOUT_MS = 60000;  // retrieval plus answer generation
 
 function uid() { return 'mem_' + Math.random().toString(36).slice(2, 10); }
 function esc(v) {
@@ -1680,33 +1686,16 @@ async function sendQA() {
   const timer = setTimeout(() => ctrl.abort(), QA_TIMEOUT_MS);
 
   try {
-    const res = await fetch('/api/search', {
+    const res = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q }),
+      body: JSON.stringify({ question: q }),
       signal: ctrl.signal
     });
     clearTimeout(timer);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-
-    let answer = data.answer || null;
-    let answerHtml = null;
-    if (!answer) {
-      const results = data.results || data.memories || data.items || data.data || [];
-      if (results.length) {
-        const lines = results.slice(0, 3).map(r => {
-          const { title, body } = extractResult(r);
-          return `• <strong>${esc(title)}</strong>: ${esc((body || '').slice(0, 120))}`;
-        }).join('<br>');
-        answerHtml = `Based on ${results.length} relevant memor${results.length > 1 ? 'ies' : 'y'} found:<br><br>${lines}`;
-      } else {
-        answerHtml = "I searched your Membrain knowledge base but couldn't find relevant information. Try adding more knowledge first.";
-      }
-    }
-
     const bubble = document.getElementById(tid);
-    if (bubble) bubble.innerHTML = answerHtml ?? esc(answer).replace(/\n/g, '<br>');
+    if (bubble) bubble.innerHTML = renderAnswer(await res.json());
 
   } catch (err) {
     clearTimeout(timer);
@@ -1729,6 +1718,26 @@ async function sendQA() {
     sendBtn.disabled = false;
     document.getElementById('qa-btn-txt').textContent = 'Ask';
   }
+}
+
+// Answer text is escaped first; only the server's [n] citation markers become markup.
+function renderAnswer(data) {
+  const sources = data.sources || [];
+  if (data.answer == null) {
+    const lines = sources.slice(0, 3).map(s => `• <strong>${esc(s.title)}</strong>: ${esc(s.snippet.slice(0, 120))}`).join('<br>');
+    const note = `<em class="qa-note">${esc(data.notice || 'AI answers unavailable')} — showing the closest memories instead.</em>`;
+    return lines ? `${note}<br><br>${lines}` : note;
+  }
+  let html = esc(data.answer).replace(/\n/g, '<br>')
+    .replace(/\[(\d+)\]/g, (m, n) => sources[n - 1] ? `<sup class="cite" title="${esc(sources[n - 1].title)}">${n}</sup>` : '');
+  const cited = [...new Set((data.citations || []).map(c => c.source))];
+  if (cited.length) {
+    html += '<div class="qa-sources">' + cited.map(n => {
+      const quotes = data.citations.filter(c => c.source === n).map(c => `<q>${esc(c.cited_text)}</q>`).join(' ');
+      return `<div class="qa-source"><sup class="cite">${n}</sup><strong>${esc(sources[n - 1].title)}</strong> ${quotes}</div>`;
+    }).join('') + '</div>';
+  }
+  return html;
 }
 
 function addBubble(cls, html, id = '') {

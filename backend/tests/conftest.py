@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.config import BACKEND_DIR, Settings
 from app.main import create_app
+from app.services.answers import Answer, AnswerUnavailable, Citation
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL", "postgresql+asyncpg://membrain:membrain@localhost:5432/membrain_test"
@@ -36,6 +37,21 @@ class FakeEmbedder:
 
     def embed_query(self, text):
         return self._embed(text)
+
+
+class FakeAnswerer:
+    """Cites the first sentence of the top source; set `fail` to simulate an unavailable provider."""
+
+    def __init__(self):
+        self.calls = []
+        self.fail = False
+
+    async def answer(self, question, sources):
+        self.calls.append((question, sources))
+        if self.fail:
+            raise AnswerUnavailable("Anthropic credentials are not configured")
+        quote = sources[0].text.split(".")[0]
+        return Answer(text=f"{quote}.[1]", citations=[Citation(source=1, cited_text=quote)], model="fake-model")
 
 
 def _raw_dsn(url: str) -> str:
@@ -74,12 +90,19 @@ def database_url():
 
 
 @pytest.fixture
-def make_client(database_url):
+def answerer():
+    return FakeAnswerer()
+
+
+@pytest.fixture
+def make_client(database_url, answerer):
     asyncio.run(_truncate(database_url))
     clients = []
 
     def _make(workspace: str = "test") -> TestClient:
-        app = create_app(Settings(database_url=database_url, workspace=workspace), embedder=FakeEmbedder())
+        app = create_app(
+            Settings(database_url=database_url, workspace=workspace), embedder=FakeEmbedder(), answerer=answerer
+        )
         c = TestClient(app)
         c.__enter__()
         clients.append(c)

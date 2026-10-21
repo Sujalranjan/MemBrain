@@ -70,3 +70,43 @@ def test_reinforce(client):
     r = client.post(f"/api/memories/{m['id']}/reinforce")
     assert r.status_code == 200 and r.json()["strength"] == 1.0
     assert client.post("/api/memories/00000000-0000-0000-0000-000000000000/reinforce").status_code == 404
+
+
+def ask(client, question):
+    r = client.post("/api/ask", json={"question": question})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_ask_returns_cited_answer_mapped_to_memories(client, answerer):
+    m = add(client, "Launch decision", "The mobile launch moves to January. Payments is understaffed.")
+    add(client, "Lunch", "Pizza on Friday.")
+
+    data = ask(client, "when is the mobile launch")
+    assert data["answer"] == "The mobile launch moves to January.[1]"
+    assert data["grounded"] and data["model"] == "fake-model"
+    assert data["sources"][0]["id"] == m["id"]
+    assert data["citations"] == [
+        {
+            "source": 1,
+            "memory_id": m["id"],
+            "title": "Launch decision",
+            "cited_text": "The mobile launch moves to January",
+        }
+    ]
+    question, sources = answerer.calls[0]
+    assert question == "when is the mobile launch" and sources[0].title == "Launch decision"
+
+
+def test_ask_without_memories_skips_the_model(client, answerer):
+    data = ask(client, "anything")
+    assert data["answer"] and not data["grounded"] and data["sources"] == []
+    assert answerer.calls == []
+
+
+def test_ask_falls_back_to_sources_when_answers_unavailable(client, answerer):
+    answerer.fail = True
+    add(client, "Launch decision", "The mobile launch moves to January.")
+    data = ask(client, "mobile launch")
+    assert data["answer"] is None and data["notice"]
+    assert data["sources"][0]["title"] == "Launch decision"
