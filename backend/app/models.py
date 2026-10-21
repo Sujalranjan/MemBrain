@@ -39,6 +39,8 @@ class Memory(Base):
     # Forgetting-curve state (see services/decay.py): retention is derived at read time from these.
     stability: Mapped[float] = mapped_column(Float, default=10.0)
     access_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Document length for BM25: total term frequency across title and body (see MemoryTerm).
+    term_count: Mapped[int] = mapped_column(Integer, default=0)
     # Document-level embedding (mean of chunk vectors) used for memory-to-memory similarity in the graph.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 
@@ -65,6 +67,22 @@ class Memory(Base):
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
     )
+
+
+class MemoryTerm(Base):
+    """Inverted index for BM25: one posting per (memory, stemmed lexeme) with its term frequency.
+
+    Derived from `Memory.search_tsv` when a memory is stored; title occurrences count double.
+    """
+
+    __tablename__ = "memory_terms"
+
+    memory_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("memories.id", ondelete="CASCADE"), primary_key=True)
+    lexeme: Mapped[str] = mapped_column(Text, primary_key=True)
+    workspace: Mapped[str] = mapped_column(String(100))
+    tf: Mapped[int] = mapped_column(Integer)
+
+    __table_args__ = (Index("ix_memory_terms_workspace_lexeme", "workspace", "lexeme"),)
 
 
 class Chunk(Base):

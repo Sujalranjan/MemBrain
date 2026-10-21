@@ -4,6 +4,9 @@ updates:
     directory: /backend
     schedule:
       interval: weekly
+    # requirements.txt holds ranges (e.g. ">=2.3,<3.0"), so new releases inside them are already picked up.
+    # Only open a PR when a release falls outside a range; raising minimums can drop Python 3.10 support.
+    versioning-strategy: increase-if-necessary
   - package-ecosystem: github-actions
     directory: /
     schedule:

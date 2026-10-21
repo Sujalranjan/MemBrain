@@ -26,7 +26,10 @@ async def run_search(
         mode=mode,
         k=k,
         rrf_k=settings.rrf_k,
+        keyword_weight=settings.keyword_weight,
         candidate_pool=settings.candidate_pool,
+        bm25_k1=settings.bm25_k1,
+        bm25_b=settings.bm25_b,
         retention_weight=settings.retention_weight,
     )
     logger.info("Search mode=%s k=%d hits=%d", mode, k, len(hits))
