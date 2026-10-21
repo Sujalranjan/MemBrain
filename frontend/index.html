@@ -1204,7 +1204,6 @@ select option { background: #0a0a1a; }
       <div class="ig"><label class="lbl">Tags (comma-separated)</label><input type="text" id="c-tags" placeholder="e.g. cloud, budget, Q3, AWS"/></div>
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
         <button class="btn btn-primary" id="cap-btn" onclick="doCapture()"><span id="cap-btn-txt">Store in Membrain</span></button>
-        <span id="cap-indexing" style="display:none"><span class="indexing-badge">⏳ Indexing…</span></span>
       </div>
     </div>
 
@@ -1421,10 +1420,10 @@ updateClock();
 
 // ══════════════════════════════════════════════
 // STATE
-// FIX 1: Restored md_v2 to retrieve your 20 injected memories!
 // ══════════════════════════════════════════════
+// Server is the source of truth; localStorage is an offline cache. Memories saved while
+// offline carry localOnly: true and are uploaded on the next successful load.
 let memories = JSON.parse(localStorage.getItem('md_v2') || '[]');
-let indexingIds = new Set(JSON.parse(localStorage.getItem('md_idx') || '[]'));
 let selTypeVal = 'meeting';
 let mediaRecorder = null, audioChunks = [], recInterval = null, recSeconds = 0;
 let graphAF = null;
@@ -1434,11 +1433,19 @@ let isDragging = false, startX = 0, startY = 0;
 const QA_TIMEOUT_MS = 10000;
 
 function uid() { return 'mem_' + Math.random().toString(36).slice(2, 10); }
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+// m.decay is the strength recorded at m.accessed; current strength is derived, never accumulated.
+const DECAY_PER_DAY = 0.012, DECAY_FLOOR = 0.04;
+function strength(m) {
+  const days = (Date.now() - m.accessed) / 86400000;
+  return Math.max(DECAY_FLOOR, m.decay - days * DECAY_PER_DAY);
+}
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function saveAll() {
   localStorage.setItem('md_v2', JSON.stringify(memories));
-  localStorage.setItem('md_idx', JSON.stringify([...indexingIds]));
   updateStats();
 }
 
@@ -1479,7 +1486,7 @@ function updateStats() {
   let links = 0;
   memories.forEach(m => { links += getRelated(m).length; });
   linksEl.textContent = Math.floor(links / 2);
-  fadeEl.textContent = memories.filter(m => m.decay < 0.4).length;
+  fadeEl.textContent = memories.filter(m => strength(m) < 0.4).length;
 }
 
 // ══════════════════════════════════════════════
@@ -1512,7 +1519,7 @@ function selType(el, type) {
 }
 
 function extractResult(r) {
-  const raw = r.content || r.body || r.text || r.summary || '';
+  const raw = r.snippet || r.content || r.body || r.text || r.summary || '';
   let title = r.title || r.metadata?.title || '';
   if (!title) {
     const m = raw.match(/^Title:\s*(.+)/);
@@ -1528,6 +1535,55 @@ function extractResult(r) {
 // ══════════════════════════════════════════════
 // CAPTURE
 // ══════════════════════════════════════════════
+async function api(path, { method = 'GET', body } = {}) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function fromApi(m) {
+  return {
+    id: m.id, type: m.type, title: m.title, body: m.body, tags: m.tags,
+    created: Date.parse(m.created_at), accessed: Date.parse(m.last_accessed_at), decay: m.strength
+  };
+}
+
+async function loadMemories() {
+  try {
+    for (const m of memories.filter(x => x.localOnly)) {
+      const saved = await api('/api/memories', { method: 'POST', body: { title: m.title, body: m.body, type: m.type, tags: m.tags } });
+      memories = memories.map(x => x.id === m.id ? fromApi(saved) : x);
+    }
+    memories = (await api('/api/memories?limit=1000')).map(fromApi);
+    saveAll();
+  } catch (err) {
+    updateStats();
+    if (memories.length) toast('⚠️ Backend unreachable — showing cached memories');
+  }
+}
+
+// Stores a memory on the server (chunked + embedded synchronously); falls back to local-only when offline.
+async function persistMemory({ title, body, type, tags }) {
+  try {
+    const saved = await api('/api/memories', { method: 'POST', body: { title, body, type, tags } });
+    memories.unshift(fromApi(saved));
+    saveAll();
+    return true;
+  } catch (err) {
+    memories.unshift({ id: uid(), type, title, body, tags, created: Date.now(), accessed: Date.now(), decay: 1.0, localOnly: true });
+    saveAll();
+    return false;
+  }
+}
+
 async function doCapture() {
   const title = document.getElementById('c-title').value.trim();
   const body = document.getElementById('c-body').value.trim();
@@ -1540,41 +1596,11 @@ async function doCapture() {
   txt.innerHTML = '<span class="spin"></span> Saving…';
 
   try {
-    const res = await fetch('/api/capture', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, body, type: selTypeVal, tags })
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const newId = uid();
-    memories.unshift({ id: newId, type: selTypeVal, title, body, tags, created: Date.now(), accessed: Date.now(), decay: 1.0 });
-    indexingIds.add(newId);
-    saveAll();
-
+    const synced = await persistMemory({ title, body, type: selTypeVal, tags });
     document.getElementById('c-title').value = '';
     document.getElementById('c-body').value = '';
     document.getElementById('c-tags').value = '';
-
-    const badge = document.getElementById('cap-indexing');
-    badge.style.display = 'inline-flex';
-    toast('✦ Queued in Membrain — indexing…');
-
-    setTimeout(() => {
-      indexingIds.delete(newId);
-      saveAll();
-      badge.style.display = 'none';
-      toast('✦ Membrain indexing complete');
-    }, 8000);
-
-  } catch (err) {
-    const newId = uid();
-    memories.unshift({ id: newId, type: selTypeVal, title, body, tags, created: Date.now(), accessed: Date.now(), decay: 1.0 });
-    saveAll();
-    document.getElementById('c-title').value = '';
-    document.getElementById('c-body').value = '';
-    document.getElementById('c-tags').value = '';
-    toast('✦ Saved locally (offline mode)');
+    toast(synced ? '✦ Stored & indexed in Membrain' : '✦ Saved locally (offline mode)');
   } finally {
     btn.disabled = false;
     txt.textContent = 'Store in Membrain';
@@ -1623,11 +1649,11 @@ function renderSearchResults(results, local = false) {
         const { title, body, score, type } = extractResult(r);
         return `<div class="result-card">
           <div style="display:flex;align-items:center;gap:8px">
-            <div class="type-badge b-${type}">${type}</div>
+            <div class="type-badge b-${esc(type)}">${esc(type)}</div>
             ${score !== null ? `<div class="result-score">▲ ${score}% Match${local ? ' (local)' : ''}</div>` : ''}
           </div>
-          <div class="result-title">${title || 'Untitled'}</div>
-          <div class="result-snip">${(body || '').slice(0, 200)}${(body || '').length > 200 ? '…' : ''}</div>
+          <div class="result-title">${esc(title || 'Untitled')}</div>
+          <div class="result-snip">${esc((body || '').slice(0, 200))}${(body || '').length > 200 ? '…' : ''}</div>
         </div>`;
       }).join('') + '</div>';
     toast(`Found ${results.length} result${results.length !== 1 ? 's' : ''}`);
@@ -1646,7 +1672,7 @@ async function sendQA() {
   sendBtn.disabled = true;
   document.getElementById('qa-btn-txt').innerHTML = '<span class="spin"></span>';
 
-  addBubble('qa-user', q);
+  addBubble('qa-user', esc(q));
   const tid = 'think_' + Date.now();
   addBubble('qa-ai', '<span class="spin"></span> Searching neural knowledge graph…', tid);
 
@@ -1664,22 +1690,23 @@ async function sendQA() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    let answer = data.interpreted?.answer_summary || data.answer || data.summary || null;
+    let answer = data.answer || null;
+    let answerHtml = null;
     if (!answer) {
       const results = data.results || data.memories || data.items || data.data || [];
       if (results.length) {
         const lines = results.slice(0, 3).map(r => {
           const { title, body } = extractResult(r);
-          return `• <strong>${title}</strong>: ${(body || '').slice(0, 120)}`;
+          return `• <strong>${esc(title)}</strong>: ${esc((body || '').slice(0, 120))}`;
         }).join('<br>');
-        answer = `Based on ${results.length} relevant memor${results.length > 1 ? 'ies' : 'y'} found:<br><br>${lines}`;
+        answerHtml = `Based on ${results.length} relevant memor${results.length > 1 ? 'ies' : 'y'} found:<br><br>${lines}`;
       } else {
-        answer = "I searched your Membrain knowledge base but couldn't find relevant information. Try adding more knowledge first.";
+        answerHtml = "I searched your Membrain knowledge base but couldn't find relevant information. Try adding more knowledge first.";
       }
     }
 
     const bubble = document.getElementById(tid);
-    if (bubble) bubble.innerHTML = answer.replace(/\n/g, '<br>');
+    if (bubble) bubble.innerHTML = answerHtml ?? esc(answer).replace(/\n/g, '<br>');
 
   } catch (err) {
     clearTimeout(timer);
@@ -1692,7 +1719,7 @@ async function sendQA() {
     if (err.name === 'AbortError') {
       if (bubble) { bubble.className = 'qa-bubble qa-ai qa-error'; bubble.innerHTML = '⚠️ Request timed out. Falling back to local search…'; }
     } else if (local.length && bubble) {
-      const lines = local.map(m => `• <strong>${m.title}</strong>: ${m.body.slice(0, 100)}`).join('<br>');
+      const lines = local.map(m => `• <strong>${esc(m.title)}</strong>: ${esc(m.body.slice(0, 100))}`).join('<br>');
       bubble.innerHTML = `<em style="color:var(--text3);font-size:11px">Local results (offline):</em><br><br>${lines}`;
     } else if (bubble) {
       bubble.className = 'qa-bubble qa-ai qa-error';
@@ -1780,18 +1807,15 @@ async function stopMic() {
   document.getElementById('mic-stop-btn').style.display = 'none';
 }
 
-// (Keep your existing saveVoice() function exactly as it is right below this!)
-
 async function saveVoice() {
   const body = document.getElementById('v-transcript').value.trim();
   const title = document.getElementById('v-title').value.trim();
   const type = document.getElementById('v-type').value;
   if (!body) { toast('⚠️ No transcription yet'); return; }
-  memories.unshift({ id: uid(), type, title: title || 'Voice Note', body, tags: ['voice-capture'], created: Date.now(), accessed: Date.now(), decay: 1.0 });
-  saveAll();
+  const synced = await persistMemory({ title: title || 'Voice Note', body, type, tags: ['voice-capture'] });
   document.getElementById('v-transcript').value = '';
   document.getElementById('v-title').value = '';
-  toast('🎙 Voice memory stored!');
+  toast(synced ? '🎙 Voice memory stored!' : '🎙 Voice memory saved locally (offline mode)');
 }
 
 // ══════════════════════════════════════════════
@@ -1817,12 +1841,11 @@ async function saveFile() {
   const type = document.getElementById('f-type').value;
   const tags = document.getElementById('f-tags').value.trim().split(',').map(t => t.trim()).filter(Boolean);
   if (!body) return;
-  memories.unshift({ id: uid(), type, title: title || 'Uploaded file', body, tags: [...tags, 'file'], created: Date.now(), accessed: Date.now(), decay: 1.0 });
-  saveAll();
+  const synced = await persistMemory({ title: title || 'Uploaded file', body, type, tags: [...tags, 'file'] });
   document.getElementById('f-body').value = '';
   document.getElementById('f-title').value = '';
   document.getElementById('f-tags').value = '';
-  toast('📎 File saved!');
+  toast(synced ? '📎 File saved!' : '📎 File saved locally (offline mode)');
 }
 
 // ══════════════════════════════════════════════
@@ -1843,15 +1866,15 @@ function renderBrowse() {
     return;
   }
   el.innerHTML = list.map(m => {
-    const d = m.decay;
+    const d = strength(m);
     const dc = decayColor(d);
-    const idxBadge = indexingIds.has(m.id) ? '<span class="indexing-badge" style="margin-left:6px">⏳ Indexing…</span>' : '';
+    const idxBadge = m.localOnly ? '<span class="indexing-badge" style="margin-left:6px">⚠ Local only</span>' : '';
     return `<div class="k-card">
       <div class="k-header">
-        <div class="type-badge b-${m.type}">${m.type}</div>
-        <div class="k-title">${m.title}${idxBadge}</div>
+        <div class="type-badge b-${esc(m.type)}">${esc(m.type)}</div>
+        <div class="k-title">${esc(m.title)}${idxBadge}</div>
       </div>
-      <div class="k-body">${m.body.slice(0, 200)}${m.body.length > 200 ? '…' : ''}</div>
+      <div class="k-body">${esc(m.body.slice(0, 200))}${m.body.length > 200 ? '…' : ''}</div>
       <div class="k-footer">
         <div class="k-meta">${fmtAgo(m.created)}</div>
         <div class="decay-wrap">
@@ -1864,9 +1887,16 @@ function renderBrowse() {
   }).join('');
 }
 
-function deleteMem(id) {
+async function deleteMem(id) {
+  const mem = memories.find(m => m.id === id);
+  if (mem && !mem.localOnly) {
+    try {
+      await api(`/api/memories/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch (err) {
+      if (err.status !== 404) { toast('⚠️ Could not delete — backend unreachable'); return; }
+    }
+  }
   memories = memories.filter(m => m.id !== id);
-  indexingIds.delete(id);
   saveAll();
   renderBrowse();
   toast('Memory deleted.');
@@ -1874,7 +1904,6 @@ function deleteMem(id) {
 
 // ══════════════════════════════════════════════
 // GRAPH — Fully Integrated Magic Physics & Zoom/Pan
-// FIX 2: Restored non-freezing physics logic, combined with new visuals!
 // ══════════════════════════════════════════════
 const TYPE_COLORS = {
   meeting: '#6c4fff', decision: '#ffbe0b', sop: '#00d4c8',
@@ -1924,9 +1953,9 @@ function renderGraph() {
     y: H/2 + (Math.random()-0.5)*200,
     vx: 0, vy: 0,
     color: TYPE_COLORS[m.type] || '#6677aa',
-    decay: m.decay,
+    decay: strength(m),
     m: m,
-    radius: 6 + (m.decay * 6),
+    radius: 6 + (strength(m) * 6),
     pulse: Math.random() * Math.PI * 2,
     pulseSpeed: 0.018 + Math.random() * 0.018
   }));
@@ -2155,22 +2184,17 @@ function renderGraph() {
 // DECAY
 // ══════════════════════════════════════════════
 function renderDecay() {
-  memories.forEach(m => {
-    const days = (Date.now() - m.accessed) / 86400000;
-    m.decay = Math.max(0.04, m.decay - days * 0.012);
-  });
-  saveAll();
-
-  const fading = [...memories].filter(m => m.decay < 0.4).sort((a, b) => a.decay - b.decay);
-  const healthy = [...memories].filter(m => m.decay >= 0.4).sort((a, b) => b.decay - a.decay);
+  const scored = memories.map(m => ({ ...m, decay: strength(m) }));
+  const fading = scored.filter(m => m.decay < 0.4).sort((a, b) => a.decay - b.decay);
+  const healthy = scored.filter(m => m.decay >= 0.4).sort((a, b) => b.decay - a.decay);
   let html = '';
 
   if (fading.length) {
     html += `<div class="decay-section" style="border-color:rgba(255,77,109,0.25);margin-bottom:14px">
       <div class="decay-section-title" style="color:var(--coral)">⌁ Fading <span style="font-size:9px;color:var(--coral);font-weight:400;opacity:0.7">${fading.length} memories</span></div>
       ${fading.map(m => `<div class="decay-row">
-        <div class="type-badge b-${m.type}">${m.type}</div>
-        <div class="decay-name">${m.title}</div>
+        <div class="type-badge b-${esc(m.type)}">${esc(m.type)}</div>
+        <div class="decay-name">${esc(m.title)}</div>
         <div class="decay-bar" style="width:90px"><div class="decay-fill" style="width:${m.decay * 100}%;background:${decayColor(m.decay)}"></div></div>
         <div class="decay-pct" style="color:var(--coral)">${Math.round(m.decay * 100)}%</div>
         <button class="btn btn-ghost btn-sm" onclick="reinforce('${m.id}')">Reinforce</button>
@@ -2182,8 +2206,8 @@ function renderDecay() {
     html += `<div class="decay-section">
       <div class="decay-section-title" style="color:var(--green)">✦ Strong <span style="font-size:9px;color:var(--green);font-weight:400;opacity:0.7">${healthy.length} memories</span></div>
       ${healthy.map(m => `<div class="decay-row">
-        <div class="type-badge b-${m.type}">${m.type}</div>
-        <div class="decay-name">${m.title}</div>
+        <div class="type-badge b-${esc(m.type)}">${esc(m.type)}</div>
+        <div class="decay-name">${esc(m.title)}</div>
         <div class="decay-bar" style="width:90px"><div class="decay-fill" style="width:${m.decay * 100}%;background:${decayColor(m.decay)}"></div></div>
         <div class="decay-pct" style="color:var(--green)">${Math.round(m.decay * 100)}%</div>
       </div>`).join('')}
@@ -2194,11 +2218,20 @@ function renderDecay() {
   document.getElementById('decay-content').innerHTML = html;
 }
 
-function reinforce(id) {
+async function reinforce(id) {
   const m = memories.find(x => x.id === id);
   if (!m) return;
-  m.accessed = Date.now();
-  m.decay = Math.min(1, m.decay + 0.4);
+  if (m.localOnly) {
+    m.decay = Math.min(1, strength(m) + 0.4);
+    m.accessed = Date.now();
+  } else {
+    try {
+      Object.assign(m, fromApi(await api(`/api/memories/${encodeURIComponent(id)}/reinforce`, { method: 'POST' })));
+    } catch (err) {
+      toast('⚠️ Could not reinforce — backend unreachable');
+      return;
+    }
+  }
   saveAll();
   renderDecay();
   toast('✦ Memory reinforced!');
@@ -2217,6 +2250,7 @@ function getRelated(mem) {
 
 // INIT
 updateStats();
+loadMemories();
 </script>
 </body>
 </html>
