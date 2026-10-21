@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     answer_sources: int = 6
     answer_max_source_chars: int = 6000
 
+    # Knowledge graph. Raw cosine scores from small embedding models sit in a narrow band where related
+    # and unrelated pairs overlap, so no absolute threshold works; edges are rank-based instead. Each
+    # memory links to its nearest neighbour, plus further neighbours (up to `graph_neighbors`) scoring
+    # within `graph_margin` of that best match, and never below `graph_min_similarity`.
+    graph_neighbors: int = 3
+    graph_margin: float = 0.01
+    graph_min_similarity: float = 0.5
+
 
 @lru_cache
 def get_settings() -> Settings:

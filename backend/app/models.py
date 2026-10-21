@@ -26,6 +26,8 @@ class Memory(Base):
     last_accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # Strength as of last_accessed_at; current strength is derived at read time (see services/decay.py).
     strength: Mapped[float] = mapped_column(Float, default=1.0)
+    # Document-level embedding (mean of chunk vectors) used for memory-to-memory similarity in the graph.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
 
     # Title matches outrank body matches in keyword search.
     search_tsv: Mapped[str] = mapped_column(
@@ -41,7 +43,15 @@ class Memory(Base):
         back_populates="memory", cascade="all, delete-orphan", passive_deletes=True
     )
 
-    __table_args__ = (Index("ix_memories_search_tsv", "search_tsv", postgresql_using="gin"),)
+    __table_args__ = (
+        Index("ix_memories_search_tsv", "search_tsv", postgresql_using="gin"),
+        Index(
+            "ix_memories_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
 
 class Chunk(Base):

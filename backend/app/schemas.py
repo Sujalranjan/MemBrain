@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MemoryCreate(BaseModel):
@@ -10,6 +10,18 @@ class MemoryCreate(BaseModel):
     body: str = Field(min_length=1, max_length=50_000)
     type: str = Field(default="general", max_length=50)
     tags: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("title", "body")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("must not be blank")
+        return v.strip()
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, v: list[str]) -> list[str]:
+        return list(dict.fromkeys(t.strip() for t in v if t.strip()))
 
 
 class MemoryOut(BaseModel):
@@ -71,3 +83,26 @@ class AskResponse(BaseModel):
     sources: list[SearchResult]
     model: str | None = None
     notice: str | None = None
+
+
+class GraphNode(BaseModel):
+    id: uuid.UUID
+    title: str
+    type: str
+    tags: list[str]
+    current_strength: float
+
+
+class GraphEdge(BaseModel):
+    source: uuid.UUID
+    target: uuid.UUID
+    similarity: float
+    shared_tags: list[str]
+
+
+class GraphResponse(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    neighbors: int
+    margin: float
+    min_similarity: float

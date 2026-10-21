@@ -38,6 +38,7 @@ async def create_memory(
     chunks = chunk_text(data.body, size=chunk_size, overlap=chunk_overlap)
     # The title is embedded with every chunk so each one carries its document's context.
     vectors = await run_in_threadpool(embedder.embed_documents, [f"{data.title}\n\n{c}" for c in chunks])
+    centroid = [sum(dim) / len(vectors) for dim in zip(*vectors, strict=True)]
 
     now = datetime.now(timezone.utc)
     memory = Memory(
@@ -49,6 +50,7 @@ async def create_memory(
         created_at=now,
         last_accessed_at=now,
         strength=1.0,
+        embedding=centroid,
         chunks=[Chunk(ordinal=i, content=c, embedding=v) for i, (c, v) in enumerate(zip(chunks, vectors, strict=True))],
     )
     session.add(memory)

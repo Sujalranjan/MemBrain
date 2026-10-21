@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.config import REPO_DIR, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
 from app.models import EMBEDDING_DIM
-from app.routers import ask, memories, search
+from app.routers import ask, graph, memories, search
 from app.services.answers import Answerer, ClaudeAnswerer
 from app.services.embeddings import Embedder, FastEmbedEmbedder
 
@@ -51,6 +51,7 @@ def create_app(
     app.include_router(memories.router)
     app.include_router(search.router)
     app.include_router(ask.router)
+    app.include_router(graph.router)
 
     @app.get("/", include_in_schema=False)
     async def serve_ui():

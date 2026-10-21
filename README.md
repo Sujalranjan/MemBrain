@@ -12,7 +12,7 @@ MemBrain captures unstructured team knowledge (meeting notes, decisions, SOPs, v
 - **Hybrid semantic search:** dense vector search (pgvector + local BGE embeddings) fused with Postgres full-text search using Reciprocal Rank Fusion
 - **Chunked indexing:** long documents are split into overlapping chunks, so a fact buried deep in a long note is still retrievable
 - **Grounded Q&A with citations:** answers come only from your memories, and every claim links to the exact passage it came from (Claude with the Citations API)
-- **Knowledge graph:** a hand-written force-directed physics simulation on Canvas, with zoom and pan
+- **Semantic knowledge graph:** links between memories come from embedding similarity computed in Postgres, drawn by a hand-written force-directed physics simulation on Canvas (stronger links pull nodes closer)
 - **Memory decay:** memories lose strength over time unless reinforced, so stale knowledge is surfaced for review
 - **Offline-tolerant UI:** cached memories stay visible, and memories captured offline sync automatically when the backend returns
 - **Local-first retrieval:** embeddings and search run locally on CPU (ONNX). Only answer generation calls an external model, and the app works without it
@@ -50,6 +50,24 @@ flowchart LR
 4. The API returns text blocks with `char_location` citations that point at exact spans of the source documents. The backend turns them into `[n]` markers and a list of `{source, memory_id, title, cited_text}`. Because the citations are structured API output, never parsed from free text, every quote is guaranteed to exist in the cited memory.
 5. An answer with no citations is flagged `grounded: false`. Without credentials, or if the model call fails, the endpoint still returns the retrieved memories with a `notice`, so the UI degrades instead of erroring.
 
+### How the knowledge graph works
+
+`GET /api/graph` (`app/services/graph.py`):
+1. Every memory stores a document-level embedding: the mean of its chunk vectors, in its own HNSW index.
+2. A single SQL query with a `CROSS JOIN LATERAL` finds each memory's *k* nearest neighbours. The inner `ORDER BY embedding <=> ...` lets the HNSW index serve every lookup.
+3. Edges are selected **by rank, not by absolute threshold**. Each memory links to its nearest neighbour, plus any near-ties within 0.01 of that best score, and nothing below a 0.5 floor. Directed picks are merged into undirected edges, and shared tags are reported on each edge.
+
+**Why rank-based?** I calibrated on 12 labelled memories in 4 topics (infra, sales, product, people) with the production embedding model:
+
+| Rule | Edges | On-topic | Isolated |
+|---|---|---|---|
+| Absolute threshold ≥ 0.7 | 0 | — | 12 |
+| Top-2 neighbours | 17 | 53% | 0 |
+| Mutual top-2 | 7 | 71% | 2 |
+| **Nearest + near-ties (chosen)** | **10** | **70%** | **0** |
+
+Raw cosine scores from a small embedding model fall in a narrow band (0.42–0.66 here) where same-topic and cross-topic pairs overlap, so any fixed cutoff either drops every edge or links unrelated notes. Mean-centering the vectors didn't help either: top-1 precision went from 10/12 to 8/12. Ranking neighbours is robust to that compression. Several "cross-topic" links on inspection were real relationships (a delayed launch ↔ the hiring plan that explains it). The graph builds in about 50 ms for this set.
+
 ### API
 
 | Endpoint | Method | Description |
@@ -60,6 +78,7 @@ flowchart LR
 | `/api/memories/{id}/reinforce` | POST | Boost a memory's strength |
 | `/api/search` | POST | Hybrid search: `{ "query": "...", "k": 6, "mode": "hybrid" \| "vector" \| "keyword" }` |
 | `/api/ask` | POST | Cited answer from your memories: `{ "question": "..." }` |
+| `/api/graph` | GET | Knowledge graph: nodes and similarity-weighted edges (`neighbors`, `margin`, `min_similarity` optional) |
 | `/health` | GET | Liveness check, including database connectivity |
 
 Interactive docs are at `http://127.0.0.1:8000/docs`.
@@ -102,6 +121,7 @@ Every setting has a working local default. Override them through environment var
 | `ANTHROPIC_API_KEY` | — | Enables generated answers; without it, Ask Anything lists the closest memories |
 | `ANSWER_MODEL` / `ANSWER_EFFORT` | `claude-opus-5-5` / `low` | Model and effort level used for answers |
 | `ANSWER_SOURCES` / `ANSWER_MAX_SOURCE_CHARS` | `6` / `6000` | Memories sent per question, and the per-memory size cap |
+| `GRAPH_NEIGHBORS` / `GRAPH_MARGIN` / `GRAPH_MIN_SIMILARITY` | `3` / `0.01` / `0.5` | Graph edge selection (see above) |
 | `LOG_LEVEL` | `INFO` | Logging level |
 
 ## Testing
@@ -124,12 +144,13 @@ backend/
     config.py          # pydantic-settings
     models.py          # Memory, Chunk (pgvector, tsvector)
     schemas.py         # request/response models
-    routers/           # memories, search, ask
+    routers/           # memories, search, ask, graph
     services/
       chunking.py      # paragraph/sentence-aware chunker
       embeddings.py    # Embedder protocol + fastembed implementation
       search.py        # vector + keyword retrieval, RRF fusion
       answers.py       # grounded answers with citations (Claude)
+      graph.py         # kNN graph over memory embeddings, rank-based edges
       memories.py      # CRUD and reinforcement
       decay.py         # strength model
   alembic/             # migrations
@@ -157,7 +178,7 @@ The retrieval layer was then rebuilt in-house: local embeddings, pgvector, Postg
 - [x] Hardening: input validation, async I/O, CORS lockdown, XSS fixes, config via env
 - [x] Self-hosted retrieval: local embeddings, pgvector, hybrid full-text + vector search with RRF
 - [x] LLM answers with source citations
-- [ ] Server-side knowledge graph (embedding-similarity edges)
+- [x] Server-side knowledge graph (embedding-similarity edges)
 - [ ] Forgetting-curve decay model used in ranking
 - [ ] PDF/DOCX ingestion via a background worker
 - [ ] Containerized API, GitHub Actions CI

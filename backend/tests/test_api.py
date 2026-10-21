@@ -110,3 +110,34 @@ def test_ask_falls_back_to_sources_when_answers_unavailable(client, answerer):
     data = ask(client, "mobile launch")
     assert data["answer"] is None and data["notice"]
     assert data["sources"][0]["title"] == "Launch decision"
+
+
+def test_blank_fields_are_rejected_and_tags_cleaned(client):
+    assert client.post("/api/memories", json={"title": "   ", "body": "x"}).status_code == 422
+    assert client.post("/api/memories", json={"title": "x", "body": " \n "}).status_code == 422
+    m = add(client, "  Padded  ", "body", tags=[" a ", "a", "", "b"])
+    assert m["title"] == "Padded" and m["tags"] == ["a", "b"]
+
+
+def test_graph_links_related_memories(client):
+    k8s = add(client, "Kubernetes upgrade", "Cluster upgrade to kubernetes 1.31 finished.", tags=["infra"])
+    k8s2 = add(client, "Kubernetes autoscaler", "Kubernetes cluster autoscaler tuned after upgrade.", tags=["infra"])
+    lunch = add(client, "Lunch", "Pizza on Friday at noon.")
+
+    data = client.get("/api/graph").json()
+    assert {n["id"] for n in data["nodes"]} == {k8s["id"], k8s2["id"], lunch["id"]}
+    pairs = [{e["source"], e["target"]} for e in data["edges"]]
+    assert {k8s["id"], k8s2["id"]} in pairs
+    assert all(lunch["id"] not in p for p in pairs)  # nothing similar enough to link to
+    edge = next(e for e in data["edges"] if {e["source"], e["target"]} == {k8s["id"], k8s2["id"]})
+    assert edge["shared_tags"] == ["infra"] and 0.5 <= edge["similarity"] <= 1
+
+
+def test_graph_parameters_and_deletion(client):
+    a = add(client, "Alpha notes", "alpha beta gamma")
+    b = add(client, "Alpha summary", "alpha beta delta")
+    assert client.get("/api/graph", params={"min_similarity": 0.99}).json()["edges"] == []
+    assert len(client.get("/api/graph").json()["edges"]) == 1
+    client.delete(f"/api/memories/{b['id']}")
+    data = client.get("/api/graph").json()
+    assert [n["id"] for n in data["nodes"]] == [a["id"]] and data["edges"] == []
