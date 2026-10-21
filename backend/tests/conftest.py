@@ -81,6 +81,8 @@ def database_url():
     try:
         asyncio.run(_ensure_database(TEST_DATABASE_URL))
     except (OSError, asyncpg.PostgresError, asyncio.TimeoutError) as e:
+        if os.getenv("REQUIRE_TEST_DATABASE"):
+            raise
         pytest.skip(f"Postgres not available for integration tests: {e}")
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))

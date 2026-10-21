@@ -11,3 +11,8 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
 known-third-party = ["alembic"]
+
+[tool.coverage.run]
+source = ["app"]
+# SQLAlchemy's asyncio layer resumes code inside greenlets; without this, lines after awaits go unmeasured.
+concurrency = ["greenlet", "thread"]

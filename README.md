@@ -1,5 +1,7 @@
 # MemBrain — Enterprise Neural Cortex
 
+[![CI](https://github.com/Sujalranjan/MemBrain/actions/workflows/ci.yml/badge.svg)](https://github.com/Sujalranjan/MemBrain/actions/workflows/ci.yml)
+
 **Ending corporate amnesia through semantic knowledge graphs.**
 
 MemBrain captures unstructured team knowledge (meeting notes, decisions, SOPs, voice notes, files), indexes it with a self-hosted hybrid retrieval engine, answers natural-language questions over it, and visualizes how memories relate in an interactive force-directed knowledge graph.
@@ -112,13 +114,28 @@ Interactive docs are at `http://127.0.0.1:8000/docs`.
 
 ## Quickstart
 
-**Prerequisites:** Python 3.10+, Docker, and Chrome or Edge for voice capture.
+### With Docker (everything)
 
 ```bash
 git clone https://github.com/Sujalranjan/MemBrain.git
 cd MemBrain
+docker compose up --build
+```
 
-docker compose up -d db                   # PostgreSQL 16 + pgvector
+Open **http://localhost:8000**. Migrations run automatically on startup, and the embedding model is baked into the image, so the container needs no network at runtime.
+
+To process documents in dedicated worker containers instead of the API process:
+
+```bash
+INGESTION_WORKER=false docker compose --profile workers up --build --scale worker=2
+```
+
+### For development (API on the host)
+
+**Prerequisites:** Python 3.10+, Docker, and Chrome or Edge for voice capture.
+
+```bash
+docker compose up -d db                   # PostgreSQL 16 + pgvector only
 
 python -m venv .venv
 source .venv/bin/activate                 # Windows: .venv\Scripts\activate
@@ -162,9 +179,23 @@ cd backend
 pip install -r requirements-dev.txt
 pytest          # unit tests always run; API tests use the docker compose Postgres
 ruff check .
+pytest --cov=app            # coverage report
+../scripts/smoke_test.sh    # end-to-end check against a running stack
 ```
 
-The API tests run against a real Postgres (a separate `membrain_test` database, created automatically) with a deterministic fake embedder and a fake answerer, so they're fast, free, and don't need the model or an API key. They are skipped if Postgres isn't reachable. Ingestion tests generate real PDF and DOCX files, and simulate crashed workers and flaky embedders to cover reclaiming, retries and giving up.
+The API tests run against a real Postgres (a separate `membrain_test` database, created automatically) with a deterministic fake embedder and a fake answerer, so they're fast, free, and don't need the model or an API key. They are skipped if Postgres isn't reachable (CI sets `REQUIRE_TEST_DATABASE=1` so they fail instead). Ingestion tests generate real PDF and DOCX files, and simulate crashed workers and flaky embedders to cover reclaiming, retries and giving up.
+
+### Continuous integration
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push to `main` and every pull request:
+
+| Job | What it checks |
+|---|---|
+| `lint` | `ruff check` and `ruff format --check` |
+| `test` | The full pytest suite against a real pgvector Postgres service, on Python 3.10 and 3.12, with a coverage report in the job summary (about 95%) |
+| `docker` | Builds the production image (layer-cached), starts the full stack with `docker compose up --wait`, and runs [`scripts/smoke_test.sh`](scripts/smoke_test.sh) with the **real** embedding model: store, search, upload a document, and wait for the worker to index it |
+
+Dependabot keeps pip packages, GitHub Actions and the Docker base image up to date.
 
 ## Project Structure
 
@@ -190,7 +221,11 @@ backend/
   alembic/             # migrations
   tests/
 frontend/index.html    # UI and canvas graph engine
-docker-compose.yml
+Dockerfile             # multi-stage image: venv + baked-in model, non-root, healthcheck
+docker/entrypoint.sh   # migrate, then run `api` or `worker`
+docker-compose.yml     # db, api, optional scaled workers
+scripts/smoke_test.sh  # end-to-end check used by CI
+.github/               # CI workflow, Dependabot
 ```
 
 ## Tech Stack
@@ -199,7 +234,7 @@ docker-compose.yml
 - **Backend:** Python, FastAPI, Pydantic v2, SQLAlchemy 2 (async) + asyncpg, Alembic, pypdf, python-docx
 - **AI:** Claude (Anthropic Python SDK, Citations API)
 - **Retrieval:** PostgreSQL 16, pgvector (HNSW), Postgres full-text search, fastembed (BGE-small, ONNX)
-- **Tooling:** pytest, ruff, Docker Compose
+- **Tooling:** pytest (+ coverage), ruff, Docker (multi-stage), Docker Compose, GitHub Actions, Dependabot
 
 ## History
 
@@ -215,7 +250,7 @@ The retrieval layer was then rebuilt in-house: local embeddings, pgvector, Postg
 - [x] Server-side knowledge graph (embedding-similarity edges)
 - [x] Forgetting-curve decay model used in ranking
 - [x] PDF/DOCX ingestion via a background worker
-- [ ] Containerized API, GitHub Actions CI
+- [x] Containerized API, GitHub Actions CI
 - [ ] Auth and real multi-tenant workspaces
 - [ ] Retrieval quality evaluation (recall@k / MRR) and live demo deployment
 
