@@ -56,7 +56,7 @@ async def capture_memory(request: Request):
     
     try:
         print(f"Sending to Membrain: {payload}")
-        response = requests.post(f"{ALPHANIMBLE_BASE_URL}/memories", json=payload, headers=headers, timeout=60)
+        response = requests.post(f"{ALPHANIMBLE_BASE_URL}/memories", json=payload, headers=headers, timeout=120)
         
         # It returns a 202 Accepted because it queues the job
         if response.status_code == 202:
