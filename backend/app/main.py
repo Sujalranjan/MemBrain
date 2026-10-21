@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.config import REPO_DIR, Settings, get_settings
 from app.db import make_engine, make_sessionmaker
+from app.deps import PrincipalDep, SettingsDep, api_rate_limit
 from app.models import EMBEDDING_DIM
 from app.routers import ask, documents, graph, memories, search
 from app.services.answers import Answerer, ClaudeAnswerer
@@ -41,25 +42,32 @@ def create_app(
         if settings.ingestion_worker:
             app.state.worker = IngestionWorker(app.state.sessionmaker, app.state.embedder, settings)
             app.state.worker.start()
-        logger.info("Ready: model=%s workspace=%s", settings.embedding_model, settings.workspace)
+        logger.info(
+            "Ready: model=%s auth=%s",
+            settings.embedding_model,
+            "api-keys" if settings.auth_enabled else f"disabled (workspace {settings.workspace!r})",
+        )
         yield
         if app.state.worker:
             await app.state.worker.stop()
         await engine.dispose()
 
-    app = FastAPI(title="MemBrain API", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="MemBrain API", version="0.5.0", lifespan=lifespan)
     app.dependency_overrides[get_settings] = lambda: settings
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "DELETE"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+        expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
     )
-    app.include_router(memories.router)
-    app.include_router(search.router)
-    app.include_router(ask.router)
-    app.include_router(graph.router)
-    app.include_router(documents.router)
+    for router in (memories.router, search.router, ask.router, graph.router, documents.router):
+        app.include_router(router, dependencies=[api_rate_limit])
+
+    @app.get("/api/me", tags=["auth"])
+    async def whoami(principal: PrincipalDep, settings: SettingsDep):
+        """The workspace this request is scoped to, and the key used (useful to verify a key works)."""
+        return {"workspace": principal.workspace, "key": principal.key_name, "auth_enabled": settings.auth_enabled}
 
     @app.get("/", include_in_schema=False)
     async def serve_ui():

@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from app.deps import EmbedderDep, SessionDep, SettingsDep
+from app.deps import EmbedderDep, SessionDep, SettingsDep, WorkspaceDep
 from app.schemas import MemoryCreate, MemoryOut
 from app.services import memories as svc
 
@@ -13,11 +13,13 @@ router = APIRouter(prefix="/api/memories", tags=["memories"])
 
 
 @router.post("", response_model=MemoryOut, status_code=201)
-async def create_memory(data: MemoryCreate, session: SessionDep, embedder: EmbedderDep, settings: SettingsDep):
+async def create_memory(
+    data: MemoryCreate, session: SessionDep, embedder: EmbedderDep, settings: SettingsDep, workspace: WorkspaceDep
+):
     memory = await svc.create_memory(
         session,
         embedder,
-        settings.workspace,
+        workspace,
         data,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
@@ -29,23 +31,23 @@ async def create_memory(data: MemoryCreate, session: SessionDep, embedder: Embed
 @router.get("", response_model=list[MemoryOut])
 async def list_memories(
     session: SessionDep,
-    settings: SettingsDep,
+    workspace: WorkspaceDep,
     limit: Annotated[int, Query(ge=1, le=1000)] = 200,
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
-    return [svc.to_out(m) for m in await svc.list_memories(session, settings.workspace, limit, offset)]
+    return [svc.to_out(m) for m in await svc.list_memories(session, workspace, limit, offset)]
 
 
 @router.delete("/{memory_id}", status_code=204)
-async def delete_memory(memory_id: uuid.UUID, session: SessionDep, settings: SettingsDep):
-    if not await svc.delete_memory(session, settings.workspace, memory_id):
+async def delete_memory(memory_id: uuid.UUID, session: SessionDep, workspace: WorkspaceDep):
+    if not await svc.delete_memory(session, workspace, memory_id):
         raise HTTPException(status_code=404, detail="Memory not found")
     return Response(status_code=204)
 
 
 @router.post("/{memory_id}/reinforce", response_model=MemoryOut)
-async def reinforce_memory(memory_id: uuid.UUID, session: SessionDep, settings: SettingsDep):
-    memory = await svc.get_memory(session, settings.workspace, memory_id)
+async def reinforce_memory(memory_id: uuid.UUID, session: SessionDep, workspace: WorkspaceDep):
+    memory = await svc.get_memory(session, workspace, memory_id)
     if memory is None:
         raise HTTPException(status_code=404, detail="Memory not found")
     return svc.to_out(await svc.reinforce_memory(session, memory))

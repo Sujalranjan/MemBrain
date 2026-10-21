@@ -12,11 +12,12 @@ MemBrain captures unstructured team knowledge (meeting notes, decisions, SOPs, v
 
 - **Multi-modal capture:** text, voice (on-device speech-to-text via the Web Speech API), and documents (PDF, DOCX, Markdown, text)
 - **Background document ingestion:** uploads return immediately; a worker extracts, chunks and embeds them from a Postgres-backed job queue (`FOR UPDATE SKIP LOCKED`), with retries and crash recovery
-- **Hybrid semantic search:** dense vector search (pgvector + local BGE embeddings) fused with Postgres full-text search using Reciprocal Rank Fusion
+- **Hybrid semantic search:** dense vector search (pgvector + local BGE embeddings) fused with **BM25** keyword ranking (an inverted index in Postgres) using Reciprocal Rank Fusion. On the public BEIR SciFact benchmark, hybrid raises Recall@5 from 0.765 to 0.806 over vector-only ([evaluation](#retrieval-evaluation))
 - **Chunked indexing:** long documents are split into overlapping chunks, so a fact buried deep in a long note is still retrievable
 - **Grounded Q&A with citations:** answers come only from your memories, and every claim links to the exact passage it came from (Claude with the Citations API)
 - **Semantic knowledge graph:** links between memories come from embedding similarity computed in Postgres, drawn by a hand-written force-directed physics simulation on Canvas (stronger links pull nodes closer)
 - **Forgetting-curve memory model:** retention decays exponentially. Every use (a manual review, or being cited in an AI answer) makes a memory last longer, with spaced-repetition-style gains. Fading knowledge is surfaced for review, and memories in active use get a small ranking boost
+- **Multi-tenant API keys and rate limiting:** each key belongs to a workspace, and every query, document job and graph is scoped to it. Keys are stored as SHA-256 hashes. Token-bucket limits are enforced atomically in Postgres, so they hold across replicas, with a tighter bucket for the paid `/api/ask`
 - **Offline-tolerant UI:** cached memories stay visible, and memories captured offline sync automatically when the backend returns
 - **Local-first retrieval:** embeddings and search run locally on CPU (ONNX). Only answer generation calls an external model, and the app works without it
 
@@ -38,12 +39,12 @@ flowchart LR
 **Ingestion** (`POST /api/memories`):
 1. The body is split into ~1,000-character chunks along paragraph and sentence boundaries, with 150 characters of overlap (`app/services/chunking.py`).
 2. Each chunk is embedded together with the memory's title, so every vector carries its document's context.
-3. Chunks are stored in a pgvector column with an **HNSW** index (cosine distance). Postgres maintains a weighted `tsvector` (title weighted above body) in a **GIN** index as a generated column.
+3. Chunks are stored in a pgvector column with an **HNSW** index (cosine distance). Postgres maintains a weighted `tsvector` (title weighted above body) as a generated column, and its stemmed terms are written to a `memory_terms` **inverted index** (one posting per memory and term, with term frequency; title occurrences count double) for BM25.
 
 **Search** (`POST /api/search`, `app/services/search.py`):
 1. **Vector retrieval:** nearest chunks to the query embedding, collapsed to the best chunk per memory.
-2. **Keyword retrieval:** `websearch_to_tsquery` full-text match, ranked by `ts_rank_cd`.
-3. **Fusion:** Reciprocal Rank Fusion, `score(d) = Σ 1 / (k + rank_d)` with `k = 60`. RRF needs no score calibration between retrievers. Vector search catches paraphrases ("why did the site go down?" finds an outage postmortem); keyword search catches exact terms, names and IDs that embeddings blur.
+2. **Keyword retrieval:** **BM25** computed in SQL over the postings (`k1 = 1.2`, `b = 0.75`). Any query term can match, and IDF makes rare terms count for more than common ones. Queries using web-search syntax (`"exact phrase"`, `OR`, `-exclude`) are also filtered by that expression.
+3. **Fusion:** Reciprocal Rank Fusion, `score(d) = Σ w_i / (k + rank_i(d))` with `k = 10` and equal weights, both selected on benchmark train splits (see below). RRF needs no score calibration between retrievers. Vector search catches paraphrases ("why did the site go down?" finds an outage postmortem); keyword search catches exact terms, names and IDs that embeddings blur.
 4. A light forgetting-curve prior is applied (see [How memory decay works](#how-memory-decay-works)).
 5. Each result reports *why* it matched (`matched_by`, `vector_rank`, `keyword_rank`, `vector_similarity`, `relevance`, `retention`). `mode` can be set to `vector` or `keyword` to compare retrievers.
 
@@ -56,6 +57,44 @@ flowchart LR
 4. Text is extracted (pypdf for PDFs, including empty-password encrypted ones; python-docx for Word, keeping tables in reading order), normalized, then chunked and embedded like any memory. The memory and the job's `succeeded` status are committed **in one transaction**, so a crash never leaves one without the other.
 5. Failures are classified. A bad file (corrupt, password-protected, scanned with no text layer) fails at once with a readable error, since retrying can't help. An infrastructure error is requeued and retried up to 3 times. A job whose worker died mid-way is reclaimed after 10 minutes. The upload bytes are deleted once a job finishes.
 6. Clients poll `GET /api/documents/jobs/{id}`. The UI shows a live list of recent imports.
+
+### Retrieval evaluation
+
+`backend/eval/` indexes a labelled dataset with the production pipeline (same chunker, embedding model, Postgres indexes and `search()` function), then scores each mode with standard IR metrics. Two public [BEIR](https://github.com/beir-cellar/beir) benchmarks are downloaded on demand, and an in-domain set ships in the repo:
+
+```bash
+cd backend
+python -m eval.run --dataset scifact      # BEIR SciFact: 5,183 abstracts, 300 test queries
+python -m eval.run --dataset nfcorpus     # BEIR NFCorpus: 3,633 medical documents, 323 test queries
+python -m eval.run --dataset membrain     # 36 enterprise notes, 48 queries (eval/data/membrain.json)
+python -m eval.run --dataset scifact --split train --sweep   # grid-search fusion settings
+```
+
+**Results** on held-out **test** splits (fusion settings were chosen on the separate train splits):
+
+| Dataset | Mode | Recall@5 | Recall@10 | MRR@10 | nDCG@10 |
+|---|---|---:|---:|---:|---:|
+| SciFact | vector | 0.765 | 0.836 | 0.679 | 0.714 |
+| | keyword (BM25) | 0.754 | 0.822 | 0.656 | 0.691 |
+| | **hybrid** | **0.806** | **0.876** | **0.701** | **0.740** |
+| NFCorpus | vector | 0.119 | 0.157 | 0.524 | 0.335 |
+| | keyword (BM25) | 0.128 | 0.155 | 0.526 | 0.325 |
+| | **hybrid** | **0.133** | **0.173** | **0.548** | **0.359** |
+| In-domain | vector | 0.917 | 0.938 | 0.858 | 0.878 |
+| | keyword (BM25) | 0.875 | 0.875 | 0.777 | 0.798 |
+| | **hybrid** | **0.979** | **1.000** | **0.860** | **0.894** |
+
+Hybrid beats either retriever alone on every dataset: **+5.3% Recall@5 over vector-only on SciFact** (+4.1 points), +11.3% on NFCorpus (+1.3 points; that dataset has many relevant documents per query, hence low recall@k for every mode) and +6.8% in-domain. In the in-domain set, vector search alone misses 25% of exact-identifier queries (`INC-2291`, `ERR_PAYMENT_DECLINED_51`); hybrid finds all of them, while still finding 96% of paraphrased questions that share no words with their answer. The vector-only SciFact nDCG@10 (0.714) matches the published figure for `bge-small-en-v1.5`, which is a sanity check on the harness. Per-dataset reports and raw numbers are in [`backend/eval/results/`](backend/eval/results/).
+
+**What the evaluation changed.** The first run used Postgres' built-in ranking, and the numbers exposed two problems:
+
+| Keyword retrieval | SciFact keyword R@5 | Hybrid vs vector R@5 |
+|---|---:|---:|
+| `websearch_to_tsquery` (all terms required) + `ts_rank_cd` | 0.073 | +0.4% |
+| Any term + `ts_rank_cd` | 0.439 | **−11.8%** |
+| **BM25 over an inverted index (current)** | **0.754** | **+5.3%** |
+
+Requiring every query word matched almost nothing for natural-language questions. Matching any word fixed recall, but `ts_rank_cd` has no notion of term rarity, so the noisy keyword ranking made hybrid *worse* than vector alone. A sweep showed that no fusion weight could rescue it. BM25 (IDF plus length normalization) made keyword search competitive with the embeddings, and only then did fusion pay off. BM25 queries take about 20 to 85 ms at these corpus sizes, against about 8 ms for HNSW vector search.
 
 ### How answers work
 
@@ -94,6 +133,25 @@ flowchart LR
 
 Raw cosine scores from a small embedding model fall in a narrow band (0.42–0.66 here) where same-topic and cross-topic pairs overlap, so any fixed cutoff either drops every edge or links unrelated notes. Mean-centering the vectors didn't help either: top-1 precision went from 10/12 to 8/12. Ranking neighbours is robust to that compression. Several "cross-topic" links on inspection were real relationships (a delayed launch ↔ the hiring plan that explains it). The graph builds in about 50 ms for this set.
 
+#### How authentication and rate limiting work
+
+`app/deps.py`, `app/services/auth.py`, `app/services/ratelimit.py`:
+
+- **Workspaces are the tenant boundary.** Every memory, chunk, posting and ingestion job carries a workspace, and every query filters on it. With `AUTH_ENABLED=true` the workspace comes from the caller's API key, never from the request, so a client cannot ask for another tenant's data. Cross-tenant reads, deletes, reinforcements, graph views and job lookups are covered by tests.
+- **API keys** look like `mb_<prefix>_<secret>`, with 256 random bits in the secret. Only a SHA-256 digest is stored. A fast hash is right here, unlike for passwords: there is nothing to brute-force in a random 256-bit secret, and per-request verification stays cheap. The public prefix finds the row, and the digest comparison is constant-time. Keys are sent as `Authorization: Bearer <key>` or `X-API-Key`, can be revoked instantly, and record when they were last used.
+- **Rate limiting** is a token bucket per API key (or per client IP when auth is off). Refill-and-spend is a single `INSERT … ON CONFLICT DO UPDATE … WHERE tokens >= 1` statement, so concurrent requests on one bucket serialize on its row lock. With several API replicas, the last token still can't be spent twice: a test fires 20 concurrent requests at a 5-token bucket and exactly 5 succeed. The table is `UNLOGGED` (buckets are disposable, so the write-ahead log is skipped). Responses carry `X-RateLimit-Limit` / `X-RateLimit-Remaining`; rejections are `429` with `Retry-After`. `/api/ask` has its own, tighter bucket because each call costs a model request.
+
+Keys are managed from the command line:
+
+```bash
+python -m app.cli create-key --workspace acme --name "ci pipeline"   # prints the key once
+python -m app.cli list-keys
+python -m app.cli revoke-key <prefix>
+# with Docker: docker compose exec api python -m app.cli create-key --workspace acme --name laptop
+```
+
+Auth is off by default so local development needs no setup. When it's on, the UI asks for a key on first load and keeps it in the browser.
+
 ### API
 
 | Endpoint | Method | Description |
@@ -108,7 +166,10 @@ Raw cosine scores from a small embedding model fall in a narrow band (0.42–0.6
 | `/api/documents` | POST | Upload a PDF/DOCX/text file (multipart `file`, optional `title`, `type`, `tags`); returns `202` with a job |
 | `/api/documents/jobs` | GET | Recent ingestion jobs (`limit`) |
 | `/api/documents/jobs/{id}` | GET | Job status: `queued`, `processing`, `succeeded` (with `memory_id`) or `failed` (with `error`) |
-| `/health` | GET | Liveness check, including database connectivity |
+| `/api/me` | GET | The workspace and key the request is authenticated as |
+| `/health` | GET | Liveness check, including database connectivity (public) |
+
+With `AUTH_ENABLED=true`, every `/api/*` route needs an API key (`401` otherwise). All of them are rate limited (`429` with `Retry-After`).
 
 Interactive docs are at `http://127.0.0.1:8000/docs`.
 
@@ -123,6 +184,13 @@ docker compose up --build
 ```
 
 Open **http://localhost:8000**. Migrations run automatically on startup, and the embedding model is baked into the image, so the container needs no network at runtime.
+
+To require API keys:
+
+```bash
+AUTH_ENABLED=true docker compose up --build -d
+docker compose exec api python -m app.cli create-key --workspace acme --name laptop
+```
 
 To process documents in dedicated worker containers instead of the API process:
 
@@ -157,10 +225,14 @@ Every setting has a working local default. Override them through environment var
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | `postgresql+asyncpg://membrain:membrain@localhost:5432/membrain` | Postgres connection |
-| `WORKSPACE` | `engineering` | Workspace that all reads and writes are scoped to |
+| `AUTH_ENABLED` | `false` | Require API keys; the key then decides the workspace |
+| `WORKSPACE` | `engineering` | Workspace used for every request while auth is disabled |
+| `RATE_LIMIT_ENABLED` | `true` | Enforce per-key (or per-IP) token buckets |
+| `RATE_LIMIT_PER_MINUTE` / `ASK_RATE_LIMIT_PER_MINUTE` | `120` / `10` | Bucket sizes for all API routes, and the extra bucket for `/api/ask` |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | fastembed model (384-dim) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `150` | Chunking parameters (characters) |
-| `RRF_K` / `CANDIDATE_POOL` | `60` / `50` | Fusion constant and per-retriever candidate count |
+| `RRF_K` / `KEYWORD_WEIGHT` / `CANDIDATE_POOL` | `10` / `1.0` / `50` | Fusion constant, keyword-vs-vector weight, and per-retriever candidate count (tuned with `eval/`) |
+| `BM25_K1` / `BM25_B` | `1.2` / `0.75` | BM25 term-frequency saturation and length normalization |
 | `RETENTION_WEIGHT` | `0.15` | Weight of the forgetting-curve prior in ranking (`0` = pure relevance) |
 | `CORS_ORIGINS` | `["http://localhost:8000","http://127.0.0.1:8000"]` | Allowed browser origins (JSON list) |
 | `ANTHROPIC_API_KEY` | — | Enables generated answers; without it, Ask Anything lists the closest memories |
@@ -203,22 +275,27 @@ Dependabot keeps pip packages, GitHub Actions and the Docker base image up to da
 backend/
   app/
     main.py            # app factory, lifespan, health
+    deps.py            # auth principal, workspace scoping, rate-limit dependencies
+    cli.py             # API key management (python -m app.cli)
     worker.py          # standalone ingestion worker (python -m app.worker)
     config.py          # pydantic-settings
-    models.py          # Memory, Chunk (pgvector, tsvector), IngestionJob
+    models.py          # Memory, Chunk, MemoryTerm, IngestionJob, Workspace, ApiKey
     schemas.py         # request/response models
     routers/           # memories, search, ask, graph, documents
     services/
       chunking.py      # paragraph/sentence-aware chunker
       embeddings.py    # Embedder protocol + fastembed implementation
-      search.py        # vector + keyword retrieval, RRF fusion
+      search.py        # vector (HNSW) + BM25 keyword retrieval, weighted RRF fusion
       answers.py       # grounded answers with citations (Claude)
       graph.py         # kNN graph over memory embeddings, rank-based edges
       memories.py      # CRUD and reinforcement
       extraction.py    # PDF/DOCX/text extraction with signature checks
       ingestion.py     # Postgres job queue (SKIP LOCKED) and background worker
+      auth.py          # API key generation, hashing, lookup, revocation
+      ratelimit.py     # atomic token buckets in Postgres
       decay.py         # forgetting-curve model (retention, spaced-repetition stability)
   alembic/             # migrations
+  eval/                # retrieval benchmark harness (BEIR + in-domain set), metrics, results
   tests/
 frontend/index.html    # UI and canvas graph engine
 Dockerfile             # multi-stage image: venv + baked-in model, non-root, healthcheck
@@ -251,8 +328,9 @@ The retrieval layer was then rebuilt in-house: local embeddings, pgvector, Postg
 - [x] Forgetting-curve decay model used in ranking
 - [x] PDF/DOCX ingestion via a background worker
 - [x] Containerized API, GitHub Actions CI
-- [ ] Auth and real multi-tenant workspaces
-- [ ] Retrieval quality evaluation (recall@k / MRR) and live demo deployment
+- [x] API-key auth, multi-tenant workspaces, rate limiting
+- [x] Retrieval quality evaluation (Recall@k, MRR, nDCG on BEIR + in-domain set) and BM25 keyword ranking
+- [ ] Live demo deployment
 
 ## Team
 

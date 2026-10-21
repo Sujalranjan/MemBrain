@@ -338,6 +338,13 @@ body::before {
   50% { opacity: 1; }
 }
 
+.ws-badge { cursor: pointer; }
+.key-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(2,2,10,0.75); backdrop-filter: blur(6px); }
+.key-overlay[hidden] { display: none; }
+.key-dialog { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 12px; padding: 24px; background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r); box-shadow: var(--glow2); }
+.key-dialog code { font-family: var(--fm); font-size: 11px; color: var(--accent3); }
+.key-error { min-height: 16px; color: var(--coral); font-size: 12px; }
+.key-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .topbar-title {
   font-family: var(--fh);
   font-size: 13px;
@@ -1200,10 +1207,23 @@ select option { background: #0a0a1a; }
   </div>
 </aside>
 
+<div class="key-overlay" id="key-overlay" hidden>
+  <div class="key-dialog" role="dialog" aria-modal="true" aria-labelledby="key-title">
+    <div class="sec-title" id="key-title">API key required</div>
+    <div class="sec-sub">This MemBrain server has authentication enabled. Paste the key your admin created with <code>python -m app.cli create-key</code>. It is kept in this browser only.</div>
+    <input type="password" id="key-input" placeholder="mb_…" autocomplete="off" onkeydown="if(event.key==='Enter')saveKey()"/>
+    <div class="key-error" id="key-error"></div>
+    <div class="key-actions">
+      <button class="btn" onclick="clearKey()">Forget key</button>
+      <button class="btn btn-primary" onclick="saveKey()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="main">
   <div class="topbar">
     <div class="topbar-title holo-title" id="topbar-title">Quick Capture</div>
-    <div class="badge"><div class="badge-dot live-dot"></div>Live Connection</div>
+    <div class="badge ws-badge" id="ws-badge" onclick="openKeyDialog()" title="Workspace. Click to set or change your API key"><div class="badge-dot live-dot"></div><span id="ws-name">Connecting…</span></div>
     <div class="badge" id="time-badge" style="font-family:var(--fm);font-size:9px;color:var(--accent3)"></div>
   </div>
 
@@ -1560,8 +1580,53 @@ function extractResult(r) {
 // ══════════════════════════════════════════════
 // CAPTURE
 // ══════════════════════════════════════════════
+// ── API key (only needed when the server runs with AUTH_ENABLED=true) ──
+const KEY_STORE = 'membrain_api_key';
+function getKey() { try { return localStorage.getItem(KEY_STORE) || ''; } catch (e) { return ''; } }
+function setKey(k) { try { k ? localStorage.setItem(KEY_STORE, k) : localStorage.removeItem(KEY_STORE); } catch (e) {} }
+
+function openKeyDialog(message = '') {
+  document.getElementById('key-error').textContent = message;
+  document.getElementById('key-input').value = '';
+  document.getElementById('key-overlay').hidden = false;
+  setTimeout(() => document.getElementById('key-input').focus(), 0);
+}
+function closeKeyDialog() { document.getElementById('key-overlay').hidden = true; }
+
+async function saveKey() {
+  const key = document.getElementById('key-input').value.trim();
+  if (!key) return;
+  setKey(key);
+  if (await loadIdentity()) { closeKeyDialog(); loadMemories(); }
+}
+function clearKey() { setKey(''); openKeyDialog(); }
+
+// Every API call goes through here: attaches the key, asks for one on 401, explains 429s.
+async function apiFetch(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  const key = getKey();
+  if (key) headers['X-API-Key'] = key;
+  const res = await fetch(path, { ...options, headers });
+  if (res.status === 401) openKeyDialog(key ? 'That key was rejected. Check it or ask for a new one.' : '');
+  if (res.status === 429) toast(`⏳ Rate limit reached. Try again in ${res.headers.get('Retry-After') || 'a few'}s.`);
+  return res;
+}
+
+async function loadIdentity() {
+  try {
+    const res = await apiFetch('/api/me');
+    if (!res.ok) { document.getElementById('ws-name').textContent = res.status === 401 ? 'Locked' : 'Offline'; return false; }
+    const me = await res.json();
+    document.getElementById('ws-name').textContent = me.workspace + (me.key ? ` · ${me.key}` : '');
+    return true;
+  } catch (e) {
+    document.getElementById('ws-name').textContent = 'Offline';
+    return false;
+  }
+}
+
 async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(path, {
+  const res = await apiFetch(path, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined
@@ -1654,7 +1719,7 @@ async function doSearch() {
   btn.innerHTML = '<span class="spin"></span>';
 
   try {
-    const res = await fetch('/api/search', {
+    const res = await apiFetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: q })
@@ -1717,7 +1782,7 @@ async function sendQA() {
   const timer = setTimeout(() => ctrl.abort(), QA_TIMEOUT_MS);
 
   try {
-    const res = await fetch('/api/ask', {
+    const res = await apiFetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question: q }),
@@ -1950,7 +2015,7 @@ async function saveFile() {
   const btn = document.getElementById('f-btn');
   btn.disabled = true;
   try {
-    const res = await fetch('/api/documents', { method: 'POST', body: form });
+    const res = await apiFetch('/api/documents', { method: 'POST', body: form });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { toast(`⚠️ ${typeof data.detail === 'string' ? data.detail : 'Upload rejected (HTTP ' + res.status + ')'}`, 6000); return; }
     upsertJob(data);
@@ -2387,6 +2452,7 @@ function getRelated(mem) {
 
 // INIT
 updateStats();
+loadIdentity();
 loadMemories();
 </script>
 </body>

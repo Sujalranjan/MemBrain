@@ -11,7 +11,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=(REPO_DIR / ".env", BACKEND_DIR / ".env"), extra="ignore")
 
     database_url: str = "postgresql+asyncpg://membrain:membrain@localhost:5432/membrain"
+    # With auth disabled (local development), every request uses this workspace. With auth enabled,
+    # requests need an API key and the key decides the workspace; create keys with `python -m app.cli`.
     workspace: str = "engineering"
+    auth_enabled: bool = False
+    # Token-bucket limits per API key (or per client IP when auth is disabled). /api/ask has its own,
+    # tighter bucket because each call costs a model request.
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = 120
+    ask_rate_limit_per_minute: int = 10
     cors_origins: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]
     log_level: str = "INFO"
 
@@ -24,7 +32,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = 150
 
     # Hybrid retrieval
-    rrf_k: int = 60
+    rrf_k: int = 10
     # Weight of the keyword ranking relative to the vector ranking in fusion; tuned with eval/ (see README).
     keyword_weight: float = 1.0
     candidate_pool: int = 50

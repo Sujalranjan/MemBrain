@@ -1,0 +1,139 @@
+{
+  "dataset": "membrain",
+  "source": "MemBrain in-domain set: 36 synthetic enterprise notes, 48 hand-labelled queries (written before any results were seen)",
+  "documents": 36,
+  "queries": 48,
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "chunk_size": 1000,
+  "chunk_overlap": 150,
+  "rrf_k": 10,
+  "candidate_pool": 50,
+  "run_at": "2026-10-21T23:07:44+00:00",
+  "metrics": {
+    "vector": {
+      "recall@1": 0.8020833333333334,
+      "recall@5": 0.9166666666666666,
+      "recall@10": 0.9375,
+      "hit@5": 0.9166666666666666,
+      "mrr@10": 0.8583333333333334,
+      "ndcg@10": 0.8778301928136862
+    },
+    "keyword": {
+      "recall@1": 0.71875,
+      "recall@5": 0.875,
+      "recall@10": 0.875,
+      "hit@5": 0.875,
+      "mrr@10": 0.7774305555555556,
+      "ndcg@10": 0.7982622205254196
+    },
+    "hybrid": {
+      "recall@1": 0.78125,
+      "recall@5": 0.9791666666666666,
+      "recall@10": 1.0,
+      "hit@5": 0.9791666666666666,
+      "mrr@10": 0.8600694444444444,
+      "ndcg@10": 0.8938337254245986
+    }
+  },
+  "by_query_type": {
+    "exact": {
+      "queries": 16,
+      "vector": {
+        "recall@1": 0.5625,
+        "recall@5": 0.75,
+        "recall@10": 0.8125,
+        "hit@5": 0.75,
+        "mrr@10": 0.6375,
+        "ndcg@10": 0.6796243592446264
+      },
+      "keyword": {
+        "recall@1": 1.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 1.0,
+        "ndcg@10": 1.0
+      },
+      "hybrid": {
+        "recall@1": 0.8125,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 0.8958333333333334,
+        "ndcg@10": 0.9226162191964322
+      }
+    },
+    "mixed": {
+      "queries": 8,
+      "vector": {
+        "recall@1": 0.9375,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 1.0,
+        "ndcg@10": 1.0
+      },
+      "keyword": {
+        "recall@1": 0.9375,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 1.0,
+        "ndcg@10": 0.9812931131918443
+      },
+      "hybrid": {
+        "recall@1": 0.9375,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 1.0,
+        "ndcg@10": 1.0
+      }
+    },
+    "paraphrase": {
+      "queries": 24,
+      "vector": {
+        "recall@1": 0.9166666666666666,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "hit@5": 1.0,
+        "mrr@10": 0.9583333333333334,
+        "ndcg@10": 0.9692441461309548
+      },
+      "keyword": {
+        "recall@1": 0.4583333333333333,
+        "recall@5": 0.75,
+        "recall@10": 0.75,
+        "hit@5": 0.75,
+        "mrr@10": 0.5548611111111111,
+        "ndcg@10": 0.6027600699868912
+      },
+      "hybrid": {
+        "recall@1": 0.7083333333333334,
+        "recall@5": 0.9583333333333334,
+        "recall@10": 1.0,
+        "hit@5": 0.9583333333333334,
+        "mrr@10": 0.7895833333333333,
+        "ndcg@10": 0.8392566380515758
+      }
+    }
+  },
+  "latency_ms": {
+    "embed": {
+      "p50": 4.4,
+      "p95": 5.1
+    },
+    "vector": {
+      "p50": 6.9,
+      "p95": 8.3
+    },
+    "keyword": {
+      "p50": 4.4,
+      "p95": 7.0
+    },
+    "hybrid": {
+      "p50": 8.2,
+      "p95": 10.4
+    }
+  }
+}
