@@ -4,6 +4,9 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>MemoryDesk — Enterprise Brain</title>
+<meta name="description" content="MemBrain: a self-hosted team knowledge base with hybrid search and cited answers."/>
+<meta name="theme-color" content="#04040d"/>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='none' stroke='%236c4fff' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23a78fff'/%3E%3C/svg%3E"/>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
 <style>
 :root {
@@ -23,9 +26,10 @@
   --red: #ff4d6d;
   --text: #eeeeff;
   --text2: #7777aa;
-  --text3: #33334a;
+  --text3: #6b6b93;
   --card: #0a0a1a;
-  --fh: 'Orbitron', sans-serif;
+  --fh: 'Space Grotesk', sans-serif;
+  --flogo: 'Orbitron', sans-serif;
   --fb: 'Space Grotesk', sans-serif;
   --fm: 'JetBrains Mono', monospace;
   --r: 14px;
@@ -447,10 +451,9 @@ body.read-only .ro-banner { display: block; }
 
 .sec-title {
   font-family: var(--fh);
-  font-size: 14px;
+  font-size: 19px;
   font-weight: 700;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
+  letter-spacing: -0.01em;
   background: linear-gradient(90deg, #fff, var(--accent3));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -1153,6 +1156,52 @@ select option { background: #0a0a1a; }
   0%, 100% { left: -100%; }
   50% { left: 150%; }
 }
+
+/* ════════ v2 polish: logo font, quieter background, layout, accessibility ════════ */
+.logo { font-family: var(--flogo); }
+.scanlines, #cursor-orb { display: none; }
+.lbl, .nav-section, .stat-lbl { color: var(--text2); }
+.search-wrap, .search-wrap input, .qa-bottom input { min-width: 0; }
+:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+.nav-item:focus-visible { outline-offset: -2px; }
+
+.qa-suggest { display: flex; flex-wrap: wrap; gap: 8px; }
+.qa-chip { max-width: 100%; padding: 7px 12px; border: 1px solid var(--border2); border-radius: 999px; background: rgba(108,79,255,0.08); color: var(--accent3); font: 500 12px var(--fb); text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: background 0.2s, border-color 0.2s; }
+.qa-chip:hover { background: rgba(108,79,255,0.18); border-color: var(--accent2); }
+
+.graph-info { position: absolute; left: 14px; bottom: 14px; z-index: 3; width: min(340px, calc(100% - 28px)); padding: 14px 16px; background: rgba(7,7,18,0.94); border: 1px solid var(--border2); border-radius: var(--r-sm); box-shadow: var(--glow2); font-size: 12px; color: var(--text2); }
+.graph-info[hidden] { display: none; }
+.graph-info h4 { margin: 6px 0; color: var(--text); font: 600 14px var(--fb); line-height: 1.35; padding-right: 20px; }
+.graph-info p { margin: 6px 0 0; line-height: 1.5; }
+.graph-info-meta { font-family: var(--fm); font-size: 10px; color: var(--text2); }
+.graph-info-close { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--text2); font-size: 16px; cursor: pointer; }
+.graph-info-close:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+
+.menu-btn { display: none; flex-shrink: 0; width: 36px; height: 36px; align-items: center; justify-content: center; border: 1px solid var(--border2); border-radius: var(--r-sm); background: rgba(108,79,255,0.08); color: var(--text); font-size: 18px; cursor: pointer; }
+.nav-backdrop { display: none; }
+
+@media (max-width: 860px) {
+  .menu-btn { display: inline-flex; }
+  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 900; width: 264px; min-width: 264px; transform: translateX(-100%); transition: transform 0.25s ease; }
+  body.nav-open .sidebar { transform: none; box-shadow: 0 0 60px rgba(0,0,0,0.6); }
+  .nav-backdrop { position: fixed; inset: 0; z-index: 899; background: rgba(2,2,10,0.6); }
+  body.nav-open .nav-backdrop { display: block; }
+  .topbar { padding: 10px 16px; gap: 10px; }
+  .topbar-title { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #time-badge { display: none; }
+  .content { padding: 16px; gap: 16px; }
+  .type-grid { grid-template-columns: repeat(2, 1fr); }
+  .two-col { grid-template-columns: 1fr; }
+  #graph-wrap { height: 62vh; min-height: 340px; }
+  .sec-title { font-size: 17px; }
+  .decay-row { flex-wrap: wrap; row-gap: 8px; }
+  .decay-name { order: -1; flex-basis: 100%; white-space: normal; color: var(--text); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  #stars-canvas { display: none; }
+}
 </style>
 </head>
 <body>
@@ -1163,8 +1212,9 @@ select option { background: #0a0a1a; }
 <div id="cursor-orb"></div>
 
 <div class="shell">
+<div class="nav-backdrop" onclick="toggleNav(false)"></div>
 
-<aside class="sidebar">
+<aside class="sidebar" id="sidebar">
   <div class="logo-wrap">
     <div class="logo">
       <div class="logo-icon">
@@ -1186,9 +1236,9 @@ select option { background: #0a0a1a; }
         </svg>
         <div class="logo-ring"></div>
       </div>
-      <span class="logo-text">MemoryDesk</span>
+      <span class="logo-text">MemBrain</span>
     </div>
-    <div class="logo-sub">Enterprise Brain · Neural Connect</div>
+    <div class="logo-sub">Team knowledge, searchable</div>
   </div>
   <nav class="nav">
     <div class="nav-section">Capture</div>
@@ -1225,6 +1275,7 @@ select option { background: #0a0a1a; }
 
 <div class="main">
   <div class="topbar">
+    <button class="menu-btn" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false" onclick="toggleNav()">☰</button>
     <div class="topbar-title holo-title" id="topbar-title">Quick Capture</div>
     <div class="badge ws-badge" id="ws-badge" onclick="openKeyDialog()" title="Workspace. Click to set or change your API key"><div class="badge-dot live-dot"></div><span id="ws-name">Connecting…</span></div>
     <div class="badge" id="time-badge" style="font-family:var(--fm);font-size:9px;color:var(--accent3)"></div>
@@ -1234,7 +1285,7 @@ select option { background: #0a0a1a; }
     <div class="ro-banner" role="status">Read-only demo: browse, search, explore the graph and Ask Anything over sample enterprise notes. Capturing and editing are disabled.</div>
 
     <div class="panel active" id="panel-capture">
-      <div><div class="sec-title">Add Knowledge</div><div class="sec-sub">Instantly indexed and semantically linked by Membrain's neural engine</div></div>
+      <div><div class="sec-title">Add Knowledge</div><div class="sec-sub">Chunked, embedded and linked to related memories as soon as you save</div></div>
       <div class="type-grid">
         <div class="type-card selected" onclick="selType(this,'meeting')"><div class="type-icon">📋</div><div class="type-lbl">Meeting</div><div class="type-desc">Notes & actions</div></div>
         <div class="type-card" onclick="selType(this,'decision')"><div class="type-icon">⚡</div><div class="type-lbl">Decision</div><div class="type-desc">Choices & rationale</div></div>
@@ -1245,7 +1296,7 @@ select option { background: #0a0a1a; }
       <div class="ig"><label class="lbl">Content</label><textarea id="c-body" rows="5" placeholder="Describe this piece of knowledge in detail…"></textarea></div>
       <div class="ig"><label class="lbl">Tags (comma-separated)</label><input type="text" id="c-tags" placeholder="e.g. cloud, budget, Q3, AWS"/></div>
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-        <button class="btn btn-primary" id="cap-btn" data-write onclick="doCapture()"><span id="cap-btn-txt">Store in Membrain</span></button>
+        <button class="btn btn-primary" id="cap-btn" data-write onclick="doCapture()"><span id="cap-btn-txt">Save memory</span></button>
       </div>
     </div>
 
@@ -1316,7 +1367,7 @@ select option { background: #0a0a1a; }
     </div>
 
     <div class="panel" id="panel-search">
-      <div><div class="sec-title">Semantic Search</div><div class="sec-sub">Search by meaning — Membrain understands context, not just keywords</div></div>
+      <div><div class="sec-title">Semantic Search</div><div class="sec-sub">Hybrid search: meaning (vector embeddings) plus exact terms (BM25), fused into one ranking</div></div>
       <div class="row">
         <div class="search-wrap" style="flex:1">
           <div class="search-icon">⊹</div>
@@ -1325,14 +1376,15 @@ select option { background: #0a0a1a; }
         <button class="btn btn-primary" onclick="doSearch()"><span id="search-btn-txt">Search</span></button>
       </div>
       <div id="search-out">
-        <div class="empty"><div class="empty-icon">⊹</div><div class="empty-title">Search your memory</div>Membrain returns results by semantic similarity</div>
+        <div class="empty"><div class="empty-icon">⊹</div><div class="empty-title">Search your memory</div>Each result shows whether it matched by meaning, keywords, or both</div>
       </div>
     </div>
 
     <div class="panel" id="panel-qa">
-      <div><div class="sec-title">Ask Anything</div><div class="sec-sub">Neural LLM grounded answers from your knowledge base</div></div>
+      <div><div class="sec-title">Ask Anything</div><div class="sec-sub">Answers come only from your memories, with citations to the exact passages</div></div>
       <div class="qa-wrap" id="qa-chat">
-        <div class="qa-bubble qa-ai">👋 Hi! I'm your Enterprise Brain. Ask me anything about your stored knowledge — I'll search Membrain and give you a grounded answer.</div>
+        <div class="qa-bubble qa-ai">Ask a question about anything your team has captured. Every answer cites the memories it came from, and says so when they don't contain the answer.</div>
+        <div class="qa-suggest" id="qa-suggest"></div>
       </div>
       <div class="qa-bottom">
         <input type="text" id="qa-q" placeholder="e.g. What did we decide about the AWS migration?" onkeydown="if(event.key==='Enter')sendQA()"/>
@@ -1341,7 +1393,7 @@ select option { background: #0a0a1a; }
     </div>
 
     <div class="panel" id="panel-graph">
-      <div><div class="sec-title">Knowledge Graph</div><div class="sec-sub">Visual map of how your memories connect in neural space</div></div>
+      <div><div class="sec-title">Knowledge Graph</div><div class="sec-sub">Memories linked by meaning. Drag to pan, scroll or use + / − to zoom, click a memory for details</div></div>
       <div id="graph-wrap">
         </div>
       <div class="graph-legend">
@@ -1350,6 +1402,8 @@ select option { background: #0a0a1a; }
         <div class="leg-item"><div class="leg-dot" style="background:#00d4c8"></div>SOP</div>
         <div class="leg-item"><div class="leg-dot" style="background:#ff4d6d"></div>Client</div>
         <div class="leg-item"><div class="leg-dot" style="background:#39ff85"></div>Voice</div>
+        <div class="leg-item"><div class="leg-dot" style="background:#94a3b8"></div>File</div>
+        <div class="leg-item"><div class="leg-dot" style="background:#6677aa"></div>General</div>
       </div>
     </div>
 
@@ -1558,6 +1612,7 @@ document.querySelectorAll('.nav-item[data-panel]').forEach(el => {
     if (id === 'graph') refreshGraph().then(() => setTimeout(renderGraph, 50));
     if (id === 'decay') renderDecay();
     if (id === 'file') loadJobs();
+    if (id === 'qa') renderSuggestions();
     history.replaceState(null, '', '#' + id);
   });
 });
@@ -1567,6 +1622,41 @@ function openPanelFromHash() {
   if (nav) nav.click();
 }
 window.addEventListener('hashchange', openPanelFromHash);
+
+function toggleNav(force) {
+  const open = typeof force === 'boolean' ? force : !document.body.classList.contains('nav-open');
+  document.body.classList.toggle('nav-open', open);
+  document.querySelector('.menu-btn').setAttribute('aria-expanded', String(open));
+}
+
+// Nav items are divs: make them reachable and operable from the keyboard, and close the drawer on mobile.
+document.querySelectorAll('.nav-item[data-panel]').forEach(el => {
+  el.setAttribute('role', 'button');
+  el.tabIndex = 0;
+  el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } });
+  el.addEventListener('click', () => {
+    toggleNav(false);
+    document.querySelectorAll('.nav-item[data-panel]').forEach(n => n.removeAttribute('aria-current'));
+    el.setAttribute('aria-current', 'page');
+  });
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleNav(false); });
+
+// Suggested questions, drawn from the workspace's own memories so they always have an answer.
+function renderSuggestions() {
+  const el = document.getElementById('qa-suggest');
+  if (!el) return;
+  const picks = [...memories].filter(m => !m.localOnly).sort((a, b) => b.created - a.created).slice(0, 3);
+  el.innerHTML = picks.map(m => {
+    const q = `What do we know about "${m.title}"?`;
+    return `<button class="qa-chip" type="button" data-q="${esc(q)}" title="${esc(q)}">${esc(m.title)}</button>`;
+  }).join('');
+  el.querySelectorAll('.qa-chip').forEach(b => b.addEventListener('click', () => {
+    document.getElementById('qa-q').value = b.dataset.q;
+    el.remove();
+    sendQA();
+  }));
+}
 
 function selType(el, type) {
   document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
@@ -1714,10 +1804,10 @@ async function doCapture() {
     document.getElementById('c-title').value = '';
     document.getElementById('c-body').value = '';
     document.getElementById('c-tags').value = '';
-    toast(synced ? '✦ Stored & indexed in Membrain' : '✦ Saved locally (offline mode)');
+    toast(synced ? '✦ Saved and indexed' : '✦ Saved locally (offline mode)');
   } finally {
     btn.disabled = false;
-    txt.textContent = 'Store in Membrain';
+    txt.textContent = 'Save memory';
   }
 }
 
@@ -2110,286 +2200,320 @@ const TYPE_COLORS = {
   client: '#ff4d6d', voice: '#39ff85', file: '#94a3b8', general: '#6677aa'
 };
 
-function zoomIn() { scale *= 1.2; }
-function zoomOut() { scale *= 0.8; }
-function resetGraph() { scale = 1; offsetX = 0; offsetY = 0; }
+function zoomBy(factor) {
+  const wrap = document.getElementById('graph-wrap');
+  const cx = wrap.offsetWidth / 2, cy = wrap.offsetHeight / 2;
+  const next = Math.min(4, Math.max(0.2, scale * factor));
+  offsetX = cx - (cx - offsetX) * (next / scale);
+  offsetY = cy - (cy - offsetY) * (next / scale);
+  scale = next;
+  graphView.userMoved = true;
+}
+function zoomIn() { zoomBy(1.2); }
+function zoomOut() { zoomBy(1 / 1.2); }
+function resetGraph() { graphView.userMoved = false; graphView.fitNow = true; }
+const graphView = { userMoved: false, fitNow: false };
 
 function renderGraph() {
   if (graphAF) { cancelAnimationFrame(graphAF); graphAF = null; }
 
   const wrap = document.getElementById('graph-wrap');
-  
   wrap.innerHTML = `
-    <canvas id="graph-canvas" style="position:absolute;inset:0;width:100%;height:100%;background:transparent;cursor:grab;display:block;"></canvas>
+    <canvas id="graph-canvas" aria-label="Knowledge graph of memories" role="img"></canvas>
     <div class="graph-controls">
-      <button class="graph-ctrl-btn" onclick="zoomIn()" title="Zoom In">+</button>
-      <button class="graph-ctrl-btn" onclick="zoomOut()" title="Zoom Out">−</button>
-      <button class="graph-ctrl-btn" onclick="resetGraph()" title="Reset">⟳</button>
+      <button class="graph-ctrl-btn" type="button" onclick="zoomIn()" title="Zoom in" aria-label="Zoom in">+</button>
+      <button class="graph-ctrl-btn" type="button" onclick="zoomOut()" title="Zoom out" aria-label="Zoom out">−</button>
+      <button class="graph-ctrl-btn" type="button" onclick="resetGraph()" title="Fit to view" aria-label="Fit to view">⟳</button>
     </div>
+    <div class="graph-info" id="graph-info" hidden></div>
   `;
 
   const canvas = document.getElementById('graph-canvas');
+  canvas.style.touchAction = 'none';
   const ctx = canvas.getContext('2d');
   const W = wrap.offsetWidth || 700;
   const H = wrap.offsetHeight || 420;
-  
   const dpr = window.devicePixelRatio || 1;
   canvas.width = W * dpr;
   canvas.height = H * dpr;
 
   if (!memories.length) {
     ctx.scale(dpr, dpr);
-    ctx.fillStyle = '#33334a'; 
-    ctx.font = '13px Space Grotesk,sans-serif'; 
+    ctx.fillStyle = '#7777aa';
+    ctx.font = '13px Space Grotesk,sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Add knowledge to ignite the graph', W/2, H/2); 
+    ctx.fillText('Add knowledge to see how it connects', W / 2, H / 2);
     return;
   }
 
-  const nodes = memories.map(m => ({
-    id: m.id,
-    label: m.title.slice(0, 18) + (m.title.length > 18 ? '...' : ''),
-    x: W/2 + (Math.random()-0.5)*200,
-    y: H/2 + (Math.random()-0.5)*200,
-    vx: 0, vy: 0,
-    color: TYPE_COLORS[m.type] || '#6677aa',
-    decay: strength(m),
-    m: m,
-    radius: 6 + (strength(m) * 6),
-    pulse: Math.random() * Math.PI * 2,
-    pulseSpeed: 0.018 + Math.random() * 0.018
-  }));
+  // Layout scale: each node gets roughly k x k of canvas area.
+  const k = Math.sqrt((W * H) / memories.length) * 0.7;
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const nodes = memories.map((m, i) => {
+    const r = Math.sqrt((i + 0.5) / memories.length) * Math.min(W, H) * 0.42;  // sunflower spiral start
+    return {
+      id: m.id, m,
+      title: m.title,
+      label: m.title.length > 28 ? m.title.slice(0, 27) + '…' : m.title,
+      x: W / 2 + Math.cos(i * golden) * r,
+      y: H / 2 + Math.sin(i * golden) * r,
+      vx: 0, vy: 0,
+      color: TYPE_COLORS[m.type] || '#6677aa',
+      decay: strength(m),
+      radius: 6 + strength(m) * 6,
+      degree: 0,
+      pulse: Math.random() * Math.PI * 2,
+      pulseSpeed: 0.018 + Math.random() * 0.018
+    };
+  });
 
   const edges = [];
+  const byId = new Map(nodes.map(n => [n.id, n]));
   if (graphData) {
-    const byId = new Map(nodes.map(n => [n.id, n]));
     const floor = graphData.min_similarity;
     graphData.edges.forEach(e => {
       const a = byId.get(e.source), b = byId.get(e.target);
       if (!a || !b) return;
       const w = Math.max(0, Math.min(1, (e.similarity - floor) / Math.max(1e-6, 1 - floor)));
-      edges.push({ a, b, alpha: 0, rest: 110 - 60 * w, weight: 0.5 + w });
+      edges.push({ a, b, alpha: 0, rest: k * (1.1 - 0.5 * w), weight: 0.5 + w });
     });
   } else {
     nodes.forEach(n => {
       getRelated(n.m).slice(0, 2).forEach(r => {
-        const target = nodes.find(x => x.id === r.id);
-        if(target && target !== n) {
-          if(!edges.find(e => (e.a===n && e.b===target) || (e.a===target && e.b===n))) {
-             edges.push({a: n, b: target, alpha: 0, rest: 70, weight: 1});
-          }
+        const target = byId.get(r.id);
+        if (target && target !== n && !edges.find(e => (e.a === n && e.b === target) || (e.a === target && e.b === n))) {
+          edges.push({ a: n, b: target, alpha: 0, rest: k, weight: 1 });
         }
       });
     });
   }
+  edges.forEach(e => { e.a.degree++; e.b.degree++; });
 
-  let mouse = {x: -1000, y: -1000, down: false};
-  let hoveredNode = null;
-  let draggedNode = null;
+  graphView.userMoved = false;
+  graphView.fitNow = false;
+  let heat = 1;  // simulated annealing: forces fade out so the layout settles instead of jittering
+  let hoveredNode = null, selectedNode = null, draggedNode = null;
+  const pointer = { x: -1e4, y: -1e4, down: false, panning: false, sx: 0, sy: 0, moved: 0 };
 
-  canvas.addEventListener("wheel", (e) => {
+  function toWorld(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (e.clientX - rect.left - offsetX) / scale, y: (e.clientY - rect.top - offsetY) / scale };
+  }
+  function nodeAt(pt) {
+    let best = null, bestD = Infinity;
+    nodes.forEach(n => {
+      const d = Math.hypot(pt.x - n.x, pt.y - n.y);
+      if (d < n.radius + 10 / scale && d < bestD) { best = n; bestD = d; }
+    });
+    return best;
+  }
+
+  canvas.addEventListener('wheel', e => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    const zoomFactor = 1.1;
-    const direction = e.deltaY < 0 ? 1 : -1;
-    const zoom = direction > 0 ? zoomFactor : 1 / zoomFactor;
-    const newScale = scale * zoom;
-    if (newScale < 0.3 || newScale > 4) return;
-    offsetX = mouseX - (mouseX - offsetX) * (newScale / scale);
-    offsetY = mouseY - (mouseY - offsetY) * (newScale / scale);
-    scale = newScale;
-  });
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const next = Math.min(4, Math.max(0.2, scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
+    offsetX = mx - (mx - offsetX) * (next / scale);
+    offsetY = my - (my - offsetY) * (next / scale);
+    scale = next;
+    graphView.userMoved = true;
+  }, { passive: false });
 
-  canvas.addEventListener("mousedown", (e) => {
-    mouse.down = true;
-    if (hoveredNode) {
-      draggedNode = hoveredNode;
-    } else {
-      isDragging = true;
-      startX = e.clientX - offsetX;
-      startY = e.clientY - offsetY;
-      canvas.style.cursor = "grabbing";
-    }
+  canvas.addEventListener('pointerdown', e => {
+    canvas.setPointerCapture(e.pointerId);
+    const pt = toWorld(e);
+    Object.assign(pointer, pt, { down: true, moved: 0, sx: e.clientX, sy: e.clientY });
+    draggedNode = nodeAt(pt);
+    if (draggedNode) heat = Math.max(heat, 0.3);
+    else { pointer.panning = true; startX = e.clientX - offsetX; startY = e.clientY - offsetY; canvas.style.cursor = 'grabbing'; }
   });
-
-  canvas.addEventListener("mouseup", () => {
-    mouse.down = false;
+  canvas.addEventListener('pointermove', e => {
+    const pt = toWorld(e);
+    pointer.x = pt.x; pointer.y = pt.y;
+    if (!pointer.down) return;
+    pointer.moved = Math.max(pointer.moved, Math.hypot(e.clientX - pointer.sx, e.clientY - pointer.sy));
+    if (draggedNode) { draggedNode.x = pt.x; draggedNode.y = pt.y; draggedNode.vx = draggedNode.vy = 0; heat = Math.max(heat, 0.3); }
+    else if (pointer.panning) { offsetX = e.clientX - startX; offsetY = e.clientY - startY; graphView.userMoved = true; }
+  });
+  canvas.addEventListener('pointerup', e => {
+    if (pointer.moved < 5) selectNode(nodeAt(toWorld(e)));  // a click, not a drag
+    Object.assign(pointer, { down: false, panning: false });
     draggedNode = null;
-    isDragging = false;
-    canvas.style.cursor = hoveredNode ? "grab" : "default";
+    canvas.style.cursor = 'default';
   });
+  canvas.addEventListener('pointerleave', () => { if (!pointer.down) { pointer.x = pointer.y = -1e4; } });
 
-  canvas.addEventListener("mouseleave", () => {
-    mouse.down = false;
-    draggedNode = null;
-    isDragging = false;
-    hoveredNode = null;
-    mouse.x = -1000;
-  });
+  function selectNode(n) {
+    selectedNode = n;
+    const info = document.getElementById('graph-info');
+    if (!n) { info.hidden = true; return; }
+    const m = n.m;
+    const links = edges.filter(e => e.a === n || e.b === n).length;
+    info.innerHTML = `
+      <button class="graph-info-close" type="button" aria-label="Close">×</button>
+      <span class="type-badge b-${esc(m.type)}" style="display:inline-block">${esc(m.type)}</span>
+      <h4>${esc(m.title)}</h4>
+      <div class="graph-info-meta">retention ${Math.round(n.decay * 100)}% · half-life ${Math.round(halfLife(m))}d · ${links} link${links === 1 ? '' : 's'}</div>
+      <p>${esc(m.body.slice(0, 180))}${m.body.length > 180 ? '…' : ''}</p>`;
+    info.querySelector('.graph-info-close').onclick = () => selectNode(null);
+    info.hidden = false;
+  }
 
-  canvas.addEventListener("mousemove", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    mouse.x = (e.clientX - rect.left - offsetX) / scale;
-    mouse.y = (e.clientY - rect.top - offsetY) / scale;
-    if (isDragging && !draggedNode) {
-      offsetX = e.clientX - startX;
-      offsetY = e.clientY - startY;
+  function fitTarget() {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    nodes.forEach(n => { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x); y1 = Math.max(y1, n.y); });
+    const padX = Math.min(90, W * 0.12), padY = Math.min(50, H * 0.08);  // room for labels
+    const s2 = Math.min(2, (W - padX * 2) / Math.max(1, x1 - x0), (H - padY * 2) / Math.max(1, y1 - y0));
+    return { s: s2, ox: W / 2 - ((x0 + x1) / 2) * s2, oy: H / 2 - ((y0 + y1) / 2) * s2 };
+  }
+
+  function physics() {
+    const rep = k * k * 0.06;
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i];
+      for (let j = i + 1; j < nodes.length; j++) {
+        const b = nodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        const d = Math.max(Math.hypot(dx, dy), 1);
+        const f = rep / d;
+        dx /= d; dy /= d;
+        a.vx += dx * f; a.vy += dy * f;
+        b.vx -= dx * f; b.vy -= dy * f;
+      }
+      // Pull harder along the canvas's short side so the layout takes the canvas's shape.
+      a.vx += (W / 2 - a.x) * 0.02 * Math.min(1, H / W);
+      a.vy += (H / 2 - a.y) * 0.02 * Math.min(1, W / H);
     }
-    if (draggedNode) {
-      draggedNode.x = mouse.x;
-      draggedNode.y = mouse.y;
-    }
-  });
+    edges.forEach(e => {
+      const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
+      const d = Math.max(Math.hypot(dx, dy), 1);
+      const f = (d - e.rest) * 0.06 * e.weight;
+      e.a.vx += (dx / d) * f; e.a.vy += (dy / d) * f;
+      e.b.vx -= (dx / d) * f; e.b.vy -= (dy / d) * f;
+    });
+    const maxStep = k * 0.25 * Math.max(heat, 0.05);
+    nodes.forEach(n => {
+      if (n === draggedNode) return;
+      n.vx *= 0.55; n.vy *= 0.55;
+      const sp = Math.hypot(n.vx, n.vy);
+      const step = sp > maxStep ? maxStep / sp : 1;
+      n.x += n.vx * step;
+      n.y += n.vy * step;
+    });
+    heat *= 0.993;
+  }
 
   let bgT = 0;
-
   function tick() {
+    if (!document.getElementById('panel-graph').classList.contains('active')) { graphAF = null; return; }
     bgT += 0.006;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
+    if (heat > 0.01) physics();
+    nodes.forEach(n => { n.pulse += n.pulseSpeed; });
+
+    // Keep the whole graph framed while it unfolds, until the user pans or zooms.
+    if (graphView.fitNow || (!graphView.userMoved && heat > 0.02)) {
+      const t = fitTarget(), ease = graphView.fitNow ? 0.2 : 0.12;
+      scale += (t.s - scale) * ease; offsetX += (t.ox - offsetX) * ease; offsetY += (t.oy - offsetY) * ease;
+      if (graphView.fitNow && Math.abs(t.s - scale) < 0.002) graphView.fitNow = false;
+    }
+
+    hoveredNode = pointer.down ? draggedNode : nodeAt(pointer);
+    const focus = hoveredNode || selectedNode;
+    const connected = new Set();
+    if (focus) {
+      connected.add(focus);
+      edges.forEach(e => { if (e.a === focus) connected.add(e.b); if (e.b === focus) connected.add(e.a); });
+    }
+    if (!pointer.down) canvas.style.cursor = hoveredNode ? 'pointer' : 'grab';
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
     ctx.save();
-    ctx.scale(dpr, dpr);
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
 
-    nodes.forEach(a => {
-      if(a === draggedNode) return;
-      nodes.forEach(b => {
-        if(a === b) return;
-        const dx = a.x - b.x, dy = a.y - b.y;
-        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-        if(dist < 120) { 
-          const force = 200 / (dist * dist);
-          a.vx += (dx / dist) * force;
-          a.vy += (dy / dist) * force;
-        }
-      });
-      a.vx += (W/2 - a.x) * 0.0015;
-      a.vy += (H/2 - a.y) * 0.0015;
-      a.vx *= 0.88; a.vy *= 0.88; 
-    });
-
-    edges.forEach(e => {
-      const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
-      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-      const force = (dist - e.rest) * 0.015;
-      if(e.a !== draggedNode) { e.a.vx += (dx/dist) * force; e.a.vy += (dy/dist) * force; }
-      if(e.b !== draggedNode) { e.b.vx -= (dx/dist) * force; e.b.vy -= (dy/dist) * force; }
-    });
-
-    nodes.forEach(n => {
-      if(n !== draggedNode) { n.x += n.vx; n.y += n.vy; }
-      n.pulse += n.pulseSpeed; 
-    });
-
-    hoveredNode = null;
-    let connectedNodes = new Set();
-    nodes.forEach(n => {
-      const dx = mouse.x - n.x, dy = mouse.y - n.y;
-      if(Math.sqrt(dx*dx + dy*dy) < n.radius + 12) hoveredNode = n;
-    });
-
-    if(hoveredNode) {
-      canvas.style.cursor = mouse.down ? 'grabbing' : 'grab';
-      connectedNodes.add(hoveredNode);
-      edges.forEach(e => {
-        if(e.a === hoveredNode) connectedNodes.add(e.b);
-        if(e.b === hoveredNode) connectedNodes.add(e.a);
-      });
-    } else if (!isDragging) {
-      canvas.style.cursor = 'default';
-    }
-
     edges.forEach(e => {
       e.alpha = Math.min(1, e.alpha + 0.025);
-      const isHighlighted = hoveredNode && (e.a === hoveredNode || e.b === hoveredNode);
-      const isDimmed = hoveredNode && !isHighlighted;
-      const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-
+      const lit = focus && (e.a === focus || e.b === focus);
+      const dim = focus && !lit;
       ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
-      if (isHighlighted) {
-        ctx.strokeStyle = `rgba(200,184,255,${0.55 * e.alpha})`;
-        ctx.lineWidth = 1.8 / scale; 
-      } else if (isDimmed) {
-        ctx.strokeStyle = `rgba(108,79,255,${0.03 * e.alpha})`;
-        ctx.lineWidth = 1 / scale;
-      } else {
-        ctx.strokeStyle = `rgba(108,79,255,${Math.min(0.5, 0.18 * e.weight) * e.alpha})`;
-        ctx.lineWidth = 1 / scale;
-      }
+      ctx.strokeStyle = lit ? `rgba(200,184,255,${0.7 * e.alpha})` : dim ? `rgba(108,79,255,${0.05 * e.alpha})` : `rgba(108,79,255,${Math.min(0.55, 0.22 * e.weight) * e.alpha})`;
+      ctx.lineWidth = (lit ? 2 : 1) / scale;
       ctx.stroke();
-
-      if (!isDimmed && len > 20) {
+      if (!dim) {
+        const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
         const t = (bgT * (0.3 + e.alpha * 0.2)) % 1;
-        const fx = e.a.x + dx * t, fy = e.a.y + dy * t;
-        ctx.beginPath(); ctx.arc(fx, fy, (isHighlighted ? 2.5 : 1.8) / scale, 0, Math.PI * 2);
-        ctx.fillStyle = isHighlighted ? 'rgba(255,255,255,0.9)' : `rgba(167,143,255,${0.65 * e.alpha})`;
+        ctx.beginPath(); ctx.arc(e.a.x + dx * t, e.a.y + dy * t, (lit ? 2.5 : 1.6) / scale, 0, Math.PI * 2);
+        ctx.fillStyle = lit ? 'rgba(255,255,255,0.9)' : `rgba(167,143,255,${0.55 * e.alpha})`;
         ctx.fill();
       }
     });
 
     nodes.forEach(n => {
-      const isHighlighted = hoveredNode && connectedNodes.has(n);
-      const isDimmed = hoveredNode && !connectedNodes.has(n);
-      const isMain = n === hoveredNode;
-      const pulseR = n.radius + Math.sin(n.pulse) * 2.5;
-
+      const dim = focus && !connected.has(n);
+      const main = n === focus;
+      const r = n.radius + Math.sin(n.pulse) * 1.5;
       ctx.save();
-      ctx.globalAlpha = isDimmed ? 0.12 : 1.0;
-
-      const nebula = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, pulseR * 5.5);
-      nebula.addColorStop(0, n.color + (isMain ? '28' : '14'));
-      nebula.addColorStop(1, n.color + '00');
-      ctx.beginPath(); ctx.arc(n.x, n.y, pulseR * 5.5, 0, Math.PI * 2);
-      ctx.fillStyle = nebula; ctx.fill();
-
-      if (n.decay > 0.45 || isHighlighted) {
-        const ra = (0.35 + 0.3 * Math.sin(n.pulse)) * (isMain ? 1.4 : 1);
-        ctx.beginPath(); ctx.arc(n.x, n.y, pulseR + (isMain ? 10 : 6), 0, Math.PI * 2);
-        ctx.strokeStyle = n.color + Math.round(ra * 80).toString(16).padStart(2, '0');
-        ctx.lineWidth = (isMain ? 1.5 : 1) / scale;
-        ctx.stroke();
-      }
-
-      if (isHighlighted || isMain) { ctx.shadowBlur = (isMain ? 28 : 16) / scale; ctx.shadowColor = n.color; }
-      const disc = ctx.createRadialGradient(n.x - pulseR * 0.28, n.y - pulseR * 0.28, 0, n.x, n.y, pulseR);
-      disc.addColorStop(0, n.color + 'ff');
-      disc.addColorStop(1, n.color + '99');
-      ctx.beginPath(); ctx.arc(n.x, n.y, pulseR, 0, Math.PI * 2);
-      ctx.fillStyle = disc; ctx.fill();
+      ctx.globalAlpha = dim ? 0.15 : 1;
+      const glow = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r * 3.5);
+      glow.addColorStop(0, n.color + (main ? '33' : '1a'));
+      glow.addColorStop(1, n.color + '00');
+      ctx.beginPath(); ctx.arc(n.x, n.y, r * 3.5, 0, Math.PI * 2); ctx.fillStyle = glow; ctx.fill();
+      if (main) { ctx.shadowBlur = 24 / scale; ctx.shadowColor = n.color; }
+      const disc = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.3, 0, n.x, n.y, r);
+      disc.addColorStop(0, n.color + 'ff'); disc.addColorStop(1, n.color + 'aa');
+      ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fillStyle = disc; ctx.fill();
       ctx.shadowBlur = 0;
-
-      ctx.beginPath(); ctx.arc(n.x - pulseR * 0.25, n.y - pulseR * 0.27, pulseR * 0.28, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.38)'; ctx.fill();
-
-      const decayA = n.decay * Math.PI * 2 - Math.PI / 2;
-      ctx.beginPath(); ctx.arc(n.x, n.y, pulseR + 3.5, -Math.PI / 2, decayA);
-      ctx.strokeStyle = decayColor(n.decay) + 'aa';
-      ctx.lineWidth = 1.8 / scale; ctx.stroke();
-
-      ctx.restore();
-
-      const showLabel = !hoveredNode || connectedNodes.has(n);
-      if (showLabel) {
-        ctx.save();
-        ctx.globalAlpha = isMain ? 1 : (isDimmed ? 0.15 : 0.8);
-        ctx.fillStyle = isMain ? '#ffffff' : 'rgba(200,190,255,0.85)';
-        ctx.font = isMain ? `bold ${11/scale}px JetBrains Mono,monospace` : `${10/scale}px JetBrains Mono,monospace`;
-        ctx.textAlign = 'center';
-        ctx.fillText(n.label, n.x, n.y + pulseR + (15/scale));
-        ctx.restore();
+      // Retention ring: how much of this memory is still "remembered".
+      ctx.beginPath(); ctx.arc(n.x, n.y, r + 3.5 / scale, -Math.PI / 2, n.decay * Math.PI * 2 - Math.PI / 2);
+      ctx.strokeStyle = decayColor(n.decay) + 'cc'; ctx.lineWidth = 1.8 / scale; ctx.stroke();
+      if (n === selectedNode) {
+        ctx.beginPath(); ctx.arc(n.x, n.y, r + 8 / scale, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ffffffcc'; ctx.lineWidth = 1.5 / scale; ctx.stroke();
       }
+      ctx.restore();
     });
-    
-    ctx.restore(); 
+    ctx.restore();
+
+    // Labels in screen space at a fixed size, placed greedily by priority so they never overlap.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const placed = [];
+    const order = [...nodes].sort((a, b) =>
+      ((b === focus) - (a === focus)) || (connected.has(b) - connected.has(a)) || (b.degree - a.degree) || (b.radius - a.radius));
+    order.forEach(n => {
+      if (focus && !connected.has(n)) return;
+      const main = n === focus;
+      ctx.font = `${main ? 600 : 500} ${main ? 12 : 11}px Space Grotesk, sans-serif`;
+      const text = main ? n.title : n.label;
+      const w = ctx.measureText(text).width + 12, h = 19;
+      const cx = n.x * scale + offsetX, cy = n.y * scale + offsetY + (n.radius * scale) + 15;
+      const box = { x: cx - w / 2, y: cy - h / 2, w, h };
+      if (box.x > W || box.x + w < 0 || box.y > H || box.y + h < 0) return;
+      if (!main && placed.some(p => box.x < p.x + p.w && box.x + box.w > p.x && box.y < p.y + p.h && box.y + box.h > p.y)) return;
+      placed.push(box);
+      ctx.fillStyle = main ? 'rgba(20,16,48,0.95)' : 'rgba(4,4,13,0.72)';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(box.x, box.y, w, h, 6); else ctx.rect(box.x, box.y, w, h);
+      ctx.fill();
+      ctx.fillStyle = main ? '#ffffff' : 'rgba(214,206,255,0.92)';
+      ctx.fillText(text, cx, cy + 0.5);
+    });
+
     graphAF = requestAnimationFrame(tick);
   }
 
   tick();
 }
+
+let graphResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(graphResizeTimer);
+  graphResizeTimer = setTimeout(() => {
+    if (document.getElementById('panel-graph').classList.contains('active')) renderGraph();
+  }, 200);
+});
 
 // ══════════════════════════════════════════════
 // DECAY

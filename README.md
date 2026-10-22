@@ -10,7 +10,7 @@
 
 MemBrain indexes unstructured team knowledge with a hybrid retrieval engine (vector search plus BM25, fused with RRF) built entirely on PostgreSQL. It answers questions with citations to the exact source passages, models how knowledge fades over time, and draws how memories relate in a force-directed graph.
 
-![Semantic search over sample enterprise notes](docs/screenshots/search.png)
+![Hybrid search over sample enterprise notes: each result shows how strongly it matched](docs/screenshots/search.png)
 
 ## Highlights
 
@@ -19,6 +19,14 @@ MemBrain indexes unstructured team knowledge with a hybrid retrieval engine (vec
 - **One database, no extra infrastructure.** Vectors (pgvector HNSW), BM25 postings, the background job queue (`FOR UPDATE SKIP LOCKED`) and distributed rate limiting (atomic token buckets) all live in PostgreSQL.
 - **Grounded answers.** Claude's Citations API ties every claim to a quoted span of a stored memory. Stored text is treated as data, never as instructions.
 - **Production basics.** Multi-tenant API keys (hashed), workspace isolation, a read-only demo mode, Alembic migrations, a multi-stage Docker image, and CI running 86 tests on Python 3.10 and 3.12 plus an end-to-end smoke test of the built image.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/graph.png" alt="Knowledge graph with a selected memory and its links"/><br/><sub>Knowledge graph: memories linked by embedding similarity; click one for details</sub></td>
+    <td width="50%"><img src="docs/screenshots/decay.png" alt="Memory decay view listing fading and strong memories"/><br/><sub>Forgetting curve: fading knowledge surfaces for review</sub></td>
+  </tr>
+</table>
+<p align="center"><img src="docs/screenshots/mobile.png" alt="Knowledge base on a phone" width="260"/><br/><sub>Responsive down to phone width</sub></p>
 
 **Contents:** [Features](#features) · [Architecture](#architecture) · [Retrieval evaluation](#retrieval-evaluation) · [API](#api) · [Quickstart](#quickstart) · [Deployment](#deployment) · [Configuration](#configuration) · [Testing](#testing) · [History](#history)
 
@@ -34,6 +42,7 @@ MemBrain indexes unstructured team knowledge with a hybrid retrieval engine (vec
 - **Semantic knowledge graph:** links between memories come from embedding similarity computed in Postgres, drawn by a hand-written force-directed physics simulation on Canvas (stronger links pull nodes closer)
 - **Forgetting-curve memory model:** retention decays exponentially. Every use (a manual review, or being cited in an AI answer) makes a memory last longer, with spaced-repetition-style gains. Fading knowledge is surfaced for review, and memories in active use get a small ranking boost
 - **Multi-tenant API keys and rate limiting:** each key belongs to a workspace, and every query, document job and graph is scoped to it. Keys are stored as SHA-256 hashes. Token-bucket limits are enforced atomically in Postgres, so they hold across replicas, with a tighter bucket for the paid `/api/ask`
+- **Responsive, accessible UI:** works from desktop down to phone width (off-canvas navigation), keyboard-operable navigation with visible focus, `prefers-reduced-motion` respected, shareable deep links (`/#graph`, `/#qa`)
 - **Offline-tolerant UI:** cached memories stay visible, and memories captured offline sync automatically when the backend returns
 - **Local-first retrieval:** embeddings and search run locally on CPU (ONNX). Only answer generation calls an external model, and the app works without it
 
@@ -138,6 +147,7 @@ Requiring every query word matched almost nothing for natural-language questions
 1. Every memory stores a document-level embedding: the mean of its chunk vectors, in its own HNSW index.
 2. A single SQL query with a `CROSS JOIN LATERAL` finds each memory's *k* nearest neighbours. The inner `ORDER BY embedding <=> ...` lets the HNSW index serve every lookup.
 3. Edges are selected **by rank, not by absolute threshold**. Each memory links to its nearest neighbour, plus any near-ties within 0.01 of that best score, and nothing below a 0.5 floor. Directed picks are merged into undirected edges, and shared tags are reported on each edge.
+4. The browser lays the graph out with a force simulation written for Canvas: repulsion scaled to the canvas area so nodes spread out, similarity-weighted springs, and cooling so it settles instead of jittering. The view keeps the whole graph framed while it unfolds. Labels are placed greedily by connectivity and skipped where they would overlap. Pointer events give the same drag, pan and select behaviour with mouse and touch.
 
 **Why rank-based?** I calibrated on 12 labelled memories in 4 topics (infra, sales, product, people) with the production embedding model:
 
@@ -342,6 +352,7 @@ Dockerfile             # multi-stage image: venv + baked-in model, non-root, hea
 docker/entrypoint.sh   # migrate, then run `api` or `worker`
 docker-compose.yml     # db, api, optional scaled workers
 scripts/smoke_test.sh  # end-to-end check used by CI
+scripts/screenshots.js # regenerates docs/screenshots (headless Chrome/Edge)
 render.yaml            # Render Blueprint for the public demo
 docs/screenshots/      # README images
 .github/               # CI workflow, Dependabot
@@ -373,7 +384,7 @@ The retrieval layer was then rebuilt in-house: local embeddings, pgvector, Postg
 - [x] API-key auth, multi-tenant workspaces, rate limiting
 - [x] Retrieval quality evaluation (Recall@k, MRR, nDCG on BEIR + in-domain set) and BM25 keyword ranking
 - [x] Deployment blueprint (Render), read-only demo mode, sample data
-- [ ] Frontend overhaul
+- [x] Frontend overhaul: responsive layout, accessible navigation, readable graph with details on click
 
 ## Team
 

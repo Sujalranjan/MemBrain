@@ -11,3 +11,6 @@ venv
 backend/tests
 *.md
 docker-compose.yml
+docs
+scripts
+render.yaml
