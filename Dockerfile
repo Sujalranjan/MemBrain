@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Build stage: install dependencies into a virtualenv and bake in the embedding model ──
-FROM python:3.12-slim AS build
+FROM python:3.15-slim AS build
 
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /opt/venv
@@ -16,7 +16,7 @@ ENV FASTEMBED_CACHE_PATH=/opt/models
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding('${EMBEDDING_MODEL}')"
 
 # ── Runtime stage ──
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 ENV PATH=/opt/venv/bin:$PATH \
     FASTEMBED_CACHE_PATH=/opt/models \
